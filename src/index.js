@@ -1,4 +1,4 @@
-// Arquivo: src/index.js (do Backend) - COM SOLICITAÇÃO DE SAQUE
+// Arquivo: src/index.js (do Backend) - VERSÃO FINAL PARA SAQUES
 
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
@@ -15,7 +15,6 @@ const saltRounds = 10;
 app.use(cors());
 app.use(express.json());
 
-// ... (todas as outras rotas continuam aqui exatamente como antes) ...
 // Rota de teste
 app.get('/', (req, res) => { res.json({ message: 'API do TDP INVEST funcionando!' }); });
 // Rota para CRIAR USUÁRIO
@@ -147,48 +146,41 @@ app.get('/meu-extrato', protect, async (req, res) => {
     res.status(500).json({ error: "Não foi possível buscar o extrato." });
   }
 });
-
-// =================================================================
-// NOVA ROTA PROTEGIDA PARA CRIAR UM PEDIDO DE SAQUE
-// =================================================================
+// Rota PROTEGIDA para CRIAR UM PEDIDO DE SAQUE
 app.post('/saques', protect, async (req, res) => {
   try {
     const userId = req.user.id;
     const { amount } = req.body;
-
-    // Validação: verifica se o valor é um número positivo
-    if (!amount || amount <= 0) {
-      return res.status(400).json({ error: "O valor do saque deve ser positivo." });
-    }
-
-    // Busca a carteira do usuário
+    if (!amount || amount <= 0) { return res.status(400).json({ error: "O valor do saque deve ser positivo." }); }
     const wallet = await prisma.wallet.findUnique({ where: { userId: userId } });
-    if (!wallet) {
-      return res.status(404).json({ error: "Carteira não encontrada." });
-    }
-
-    // Calcula o saldo total disponível
+    if (!wallet) { return res.status(404).json({ error: "Carteira não encontrada." }); }
     const totalBalance = wallet.balance + wallet.referralBalance;
-
-    // Validação: verifica se o usuário tem saldo suficiente
-    if (amount > totalBalance) {
-      return res.status(400).json({ error: "Saldo insuficiente para realizar o saque." });
-    }
-
-    // Cria o pedido de saque no banco de dados com status PENDENTE
-    const newWithdrawal = await prisma.withdrawal.create({
-      data: {
-        amount: amount,
-        userId: userId,
-        // status já é 'PENDING' por padrão
-      }
-    });
-
+    if (amount > totalBalance) { return res.status(400).json({ error: "Saldo insuficiente para realizar o saque." }); }
+    const newWithdrawal = await prisma.withdrawal.create({ data: { amount: amount, userId: userId, } });
     res.status(201).json(newWithdrawal);
-
   } catch (error) {
     console.error("Erro ao criar pedido de saque:", error);
     res.status(500).json({ error: "Não foi possível processar a solicitação de saque." });
+  }
+});
+// =================================================================
+// NOVA ROTA PROTEGIDA PARA LISTAR O HISTÓRICO DE SAQUES
+// =================================================================
+app.get('/saques', protect, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const withdrawals = await prisma.withdrawal.findMany({
+      where: {
+        userId: userId,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+    res.status(200).json(withdrawals);
+  } catch (error) {
+    console.error("Erro ao buscar histórico de saques:", error);
+    res.status(500).json({ error: "Não foi possível buscar o histórico de saques." });
   }
 });
 
@@ -197,7 +189,7 @@ app.post('/saques', protect, async (req, res) => {
 app.post('/processar-rendimentos', (req, res) => {
   const { secret } = req.body;
   if (secret !== process.env.CRON_SECRET) {
-    return res.status(401).json({ error: 'Acesso não autorizado.' });
+    return res.status(401).json({ error: 'Acesso não autorizado." });
   }
   res.status(202).json({ message: "Processamento de rendimentos iniciado em segundo plano." });
   processDailyYields(); 
