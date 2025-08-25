@@ -1,4 +1,4 @@
-// Arquivo: src/index.js (do Backend) - COM CONTAGEM DE AFILIADOS
+// Arquivo: src/index.js (do Backend) - COM ROTA DE EXTRATO
 
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
@@ -15,7 +15,7 @@ const saltRounds = 10;
 app.use(cors());
 app.use(express.json());
 
-// ... (todas as outras rotas /criar-usuario, /login, etc. continuam aqui exatamente como antes) ...
+// ... (todas as outras rotas continuam aqui exatamente como antes) ...
 // Rota de teste
 app.get('/', (req, res) => { res.json({ message: 'API do TDP INVEST funcionando!' }); });
 // Rota para CRIAR USUÁRIO
@@ -110,25 +110,53 @@ app.get('/meus-investimentos', protect, async (req, res) => {
     res.status(500).json({ error: 'Não foi possível buscar os investimentos.' });
   }
 });
-
-// =================================================================
-// NOVA ROTA PROTEGIDA PARA CONTAR OS AFILIADOS
-// =================================================================
+// Rota PROTEGIDA para CONTAR OS AFILIADOS
 app.get('/minha-rede', protect, async (req, res) => {
   try {
     const userId = req.user.id;
-
-    // Comando do Prisma para contar quantos usuários têm este userId como seu 'referrerId'
     const referralCount = await prisma.user.count({
-      where: {
-        referrerId: userId,
-      }
+      where: { referrerId: userId, }
     });
-
     res.status(200).json({ count: referralCount });
   } catch (error) {
     console.error("Erro ao contar afiliados:", error);
     res.status(500).json({ error: "Não foi possível buscar os dados da rede." });
+  }
+});
+
+
+// =================================================================
+// NOVA ROTA PROTEGIDA PARA BUSCAR O EXTRATO DE TRANSAÇÕES
+// =================================================================
+app.get('/meu-extrato', protect, async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    // Primeiro, encontramos a carteira do usuário logado
+    const wallet = await prisma.wallet.findUnique({
+      where: { userId: userId },
+    });
+
+    if (!wallet) {
+      // Isso não deve acontecer para usuários criados com a nova lógica
+      return res.status(404).json({ error: "Carteira do usuário não encontrada." });
+    }
+
+    // Agora, buscamos todas as transações pertencentes a essa carteira
+    const transactions = await prisma.transaction.findMany({
+      where: {
+        walletId: wallet.id,
+      },
+      orderBy: {
+        createdAt: 'desc', // Mostra as transações mais recentes primeiro
+      },
+    });
+
+    res.status(200).json(transactions);
+
+  } catch (error) {
+    console.error("Erro ao buscar extrato:", error);
+    res.status(500).json({ error: "Não foi possível buscar o extrato." });
   }
 });
 
