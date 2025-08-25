@@ -64,14 +64,12 @@ app.get('/meus-dados', protect, async (req, res) => {
   res.status(200).json(req.user);
 });
 
-// =============================================================
-// NOVA ROTA PÚBLICA PARA LISTAR OS PLANOS DE INVESTIMENTO
-// =============================================================
+// Rota PÚBLICA para LISTAR OS PLANOS DE INVESTIMENTO
 app.get('/planos', async (req, res) => {
   try {
     const planos = await prisma.plan.findMany({
       orderBy: {
-        price: 'asc' // Ordena os planos do mais barato para o mais caro
+        price: 'asc'
       }
     });
     res.status(200).json(planos);
@@ -80,6 +78,32 @@ app.get('/planos', async (req, res) => {
   }
 });
 
+// =============================================================
+// NOVA ROTA PROTEGIDA PARA CRIAR UM NOVO INVESTIMENTO
+// =============================================================
+app.post('/investimentos', protect, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { planId } = req.body;
+
+    if (!planId) {
+      return res.status(400).json({ error: 'O ID do plano é obrigatório.' });
+    }
+
+    const novoInvestimento = await prisma.investment.create({
+      data: {
+        userId: userId,
+        planId: planId,
+      }
+    });
+
+    res.status(201).json(novoInvestimento);
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Não foi possível processar o investimento.' });
+  }
+});
 
 const PORT = process.env.PORT || 3333;
 app.listen(PORT, () => {
