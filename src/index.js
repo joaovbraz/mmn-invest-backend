@@ -1,4 +1,4 @@
-// Arquivo: src/index.js (do Backend) - COM ROTA DE EXTRATO
+// Arquivo: src/index.js (do Backend) - COM DETALHES DA REDE
 
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
@@ -123,40 +123,49 @@ app.get('/minha-rede', protect, async (req, res) => {
     res.status(500).json({ error: "Não foi possível buscar os dados da rede." });
   }
 });
-
-
-// =================================================================
-// NOVA ROTA PROTEGIDA PARA BUSCAR O EXTRATO DE TRANSAÇÕES
-// =================================================================
+// Rota PROTEGIDA para BUSCAR O EXTRATO DE TRANSAÇÕES
 app.get('/meu-extrato', protect, async (req, res) => {
   try {
     const userId = req.user.id;
-
-    // Primeiro, encontramos a carteira do usuário logado
-    const wallet = await prisma.wallet.findUnique({
-      where: { userId: userId },
-    });
-
-    if (!wallet) {
-      // Isso não deve acontecer para usuários criados com a nova lógica
-      return res.status(404).json({ error: "Carteira do usuário não encontrada." });
-    }
-
-    // Agora, buscamos todas as transações pertencentes a essa carteira
-    const transactions = await prisma.transaction.findMany({
-      where: {
-        walletId: wallet.id,
-      },
-      orderBy: {
-        createdAt: 'desc', // Mostra as transações mais recentes primeiro
-      },
-    });
-
+    const wallet = await prisma.wallet.findUnique({ where: { userId: userId } });
+    if (!wallet) { return res.status(404).json({ error: "Carteira do usuário não encontrada." }); }
+    const transactions = await prisma.transaction.findMany({ where: { walletId: wallet.id }, orderBy: { createdAt: 'desc' } });
     res.status(200).json(transactions);
-
   } catch (error) {
     console.error("Erro ao buscar extrato:", error);
     res.status(500).json({ error: "Não foi possível buscar o extrato." });
+  }
+});
+
+// =================================================================
+// NOVA ROTA PROTEGIDA PARA LISTAR OS DETALHES DOS AFILIADOS
+// =================================================================
+app.get('/minha-rede-detalhes', protect, async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    // Busca todos os usuários que têm este userId como seu 'referrerId'
+    const referrals = await prisma.user.findMany({
+      where: {
+        referrerId: userId,
+      },
+      orderBy: {
+        createdAt: 'desc', // Mostra os indicados mais recentes primeiro
+      },
+      // Selecionamos apenas os campos seguros para não expor a senha, etc.
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        createdAt: true,
+      }
+    });
+
+    res.status(200).json(referrals);
+
+  } catch (error) {
+    console.error("Erro ao buscar detalhes da rede:", error);
+    res.status(500).json({ error: "Não foi possível buscar os detalhes da rede." });
   }
 });
 
