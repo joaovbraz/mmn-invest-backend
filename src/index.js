@@ -9,9 +9,7 @@ import { processDailyYields } from './jobs/yieldProcessor.js';
 const app = express();
 const prisma = new PrismaClient();
 const saltRounds = 10;
-
 const rankThresholds = { Lendário: 10000, Diamante: 5000, Platina: 1000, Ouro: 500, Prata: 300, Bronze: 0 };
-
 async function updateUserRankByTotalInvestment(userId) {
   try {
     const userInvestments = await prisma.investment.findMany({ where: { userId: userId, status: 'ACTIVE' }, include: { plan: true } });
@@ -29,10 +27,8 @@ async function updateUserRankByTotalInvestment(userId) {
     console.error(`Erro ao atualizar rank do usuário ${userId} por investimento:`, error);
   }
 }
-
 app.use(cors());
 app.use(express.json());
-
 app.get('/', (req, res) => { res.json({ message: 'API do TDP INVEST funcionando!' }); });
 app.post('/criar-usuario', async (req, res) => {
   const { email, name, password, referrerCode } = req.body;
@@ -73,25 +69,15 @@ app.post('/login', async (req, res) => {
 app.get('/meus-dados', protect, async (req, res) => {
     try {
         const userId = req.user.id;
-        console.log(`--- DEBUG /meus-dados: Buscando dados para o usuário ID: ${userId}`);
         const userWithWallet = await prisma.user.findUnique({ where: { id: userId }, include: { wallet: true } });
-        if (!userWithWallet) { 
-            console.log(`--- DEBUG /meus-dados: Usuário ID ${userId} não encontrado.`);
-            return res.status(404).json({ error: 'Usuário não encontrado.' });
-        }
-        console.log(`--- DEBUG /meus-dados: Buscando investimentos para o usuário ID: ${userId}`);
-        const userInvestments = await prisma.investment.findMany({
-            where: { userId: userId, status: 'ACTIVE' },
-            include: { plan: true },
-        });
-        console.log(`--- DEBUG /meus-dados: Encontrados ${userInvestments.length} investimentos ativos.`);
+        if (!userWithWallet) { return res.status(404).json({ error: 'Usuário não encontrado.' }); }
+        const userInvestments = await prisma.investment.findMany({ where: { userId: userId, status: 'ACTIVE' }, include: { plan: true }, });
         const totalInvested = userInvestments.reduce((sum, investment) => sum + investment.plan.price, 0);
-        console.log(`--- DEBUG /meus-dados: Total investido calculado: R$ ${totalInvested}`);
         delete userWithWallet.password;
         const responseData = { ...userWithWallet, totalInvested: totalInvested };
         res.status(200).json(responseData);
     } catch (error) {
-        console.error("--- DEBUG /meus-dados: ERRO FATAL:", error);
+        console.error("Erro em /meus-dados:", error);
         res.status(500).json({ error: "Não foi possível buscar os dados do usuário."})
     }
 });
@@ -109,22 +95,28 @@ app.post('/investimentos', protect, async (req, res) => {
     const result = await prisma.$transaction(async (prisma) => {
       const novoInvestimento = await prisma.investment.create({ data: { userId: investingUser.id, planId: planId } });
       const plan = await prisma.plan.findUnique({ where: { id: planId } });
-      if (investingUser.referrerId) {
-        const referrer = await prisma.user.findUnique({ where: { id: investingUser.referrerId }, include: { wallet: true } });
-        if (referrer && referrer.wallet) {
-          const commissionRate = 0.10;
-          const commissionAmount = plan.price * commissionRate;
-          await prisma.wallet.update({ where: { id: referrer.wallet.id }, data: { referralBalance: { increment: commissionAmount } } });
-          await prisma.transaction.create({ data: { walletId: referrer.wallet.id, amount: commissionAmount, type: 'REFERRAL_BONUS', description: `Bônus de indicação pelo investimento de ${investingUser.name} no ${plan.name}` } });
-          console.log(`Bônus de R$ ${commissionAmount} pago para o usuário ${referrer.id}`);
+      const commissionRate = 0.10;
+      const commissionAmount = plan.price * commissionRate;
+      let currentReferrerId = investingUser.referrerId;
+      for (let level = 1; level <= 4; level++) {
+        if (!currentReferrerId) {
+          console.log(`Fim da linha de indicação no nível ${level}.`);
+          break;
         }
+        const referrer = await prisma.user.findUnique({ where: { id: currentReferrerId }, include: { wallet: true }, });
+        if (referrer && referrer.wallet) {
+          await prisma.wallet.update({ where: { id: referrer.wallet.id }, data: { referralBalance: { increment: commissionAmount } }, });
+          await prisma.transaction.create({ data: { walletId: referrer.wallet.id, amount: commissionAmount, type: 'REFERRAL_BONUS', description: `Bônus de indicação (Nível ${level}) pelo investimento de ${investingUser.name}`, } });
+          console.log(`Bônus (Nível ${level}) de R$ ${commissionAmount} pago para o usuário ${referrer.id}`);
+        }
+        currentReferrerId = referrer.referrerId;
       }
       return novoInvestimento;
     });
     await updateUserRankByTotalInvestment(investingUser.id);
     res.status(201).json(result);
   } catch (error) {
-    console.error("Erro ao processar investimento e bônus:", error);
+    console.error("Erro ao processar investimento e bônus multi-nível:", error);
     res.status(500).json({ error: 'Não foi possível processar o investimento.' });
   }
 });
@@ -222,7 +214,7 @@ app.post('/admin/saques/:id/aprovar', protect, admin, async (req, res) => {
         amountToDeductFromBalance = withdrawal.amount - userWallet.referralBalance;
       }
       await prisma.wallet.update({ where: { id: userWallet.id }, data: { balance: { decrement: amountToDeductFromBalance }, referralBalance: { decrement: amountToDeductFromReferral } } });
-      await prisma.transaction.create({ data: { walletId: userWallet.id, amount: -withdrawal.amount, type: 'WITHDRAWAL', description: `Saque de ${withdrawal.amount.toLocaleString('pt-BR', { style: 'currency', 'currency': 'BRL' })} aprovado.` } });
+      await prisma.transaction.create({ data: { walletId: userWallet.id, amount: -withdrawal.amount, type: 'WITHDRAWAL', description: `Saque de ${withdrawal.amount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} aprovado.` } });
       return prisma.withdrawal.update({ where: { id: withdrawalId }, data: { status: 'APPROVED' }, });
     });
     res.status(200).json(result);
