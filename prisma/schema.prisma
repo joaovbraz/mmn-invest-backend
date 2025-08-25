@@ -1,4 +1,4 @@
-// Arquivo: prisma/schema.prisma - VERSÃO COM TABELA DE SAQUES
+// Arquivo: prisma/schema.prisma - VERSÃO COM PLANO DE CARREIRA
 
 generator client {
   provider = "prisma-client-js"
@@ -22,10 +22,15 @@ model User {
   referrer     User?        @relation("Referrals", fields: [referrerId], references: [id])
   referrals    User[]       @relation("Referrals")
   
+  // --- CAMPO NOVO PARA O PLANO DE CARREIRA ---
+  rank         String       @default("Bronze") // Guarda o rank atual do usuário
+  
   investments  Investment[]
   wallet       Wallet?
-  withdrawals  Withdrawal[] // Relação: Um usuário pode ter vários pedidos de saque
+  withdrawals  Withdrawal[]
 }
+
+// ... (o resto do schema.prisma continua exatamente o mesmo) ...
 
 model Plan {
   id            Int      @id @default(autoincrement())
@@ -64,14 +69,12 @@ model Transaction {
   wallet      Wallet   @relation(fields: [walletId], references: [id])
 }
 
-// NOVA TABELA PARA OS PEDIDOS DE SAQUE
 model Withdrawal {
   id        Int      @id @default(autoincrement())
-  amount    Float    // O valor que o usuário pediu para sacar
-  status    String   @default("PENDING") // Status: PENDING, APPROVED, REJECTED
+  amount    Float
+  status    String   @default("PENDING")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-
   userId    Int
   user      User     @relation(fields: [userId], references: [id])
 }
