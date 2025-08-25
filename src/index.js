@@ -1,4 +1,4 @@
-// Arquivo: src/index.js (do Backend) - VERSÃO FINAL PARA SAQUES
+// Arquivo: src/index.js (do Backend) - VERSÃO CORRIGIDA
 
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
@@ -163,9 +163,7 @@ app.post('/saques', protect, async (req, res) => {
     res.status(500).json({ error: "Não foi possível processar a solicitação de saque." });
   }
 });
-// =================================================================
-// NOVA ROTA PROTEGIDA PARA LISTAR O HISTÓRICO DE SAQUES
-// =================================================================
+// Rota PROTEGIDA para LISTAR O HISTÓRICO DE SAQUES
 app.get('/saques', protect, async (req, res) => {
   try {
     const userId = req.user.id;
@@ -189,7 +187,8 @@ app.get('/saques', protect, async (req, res) => {
 app.post('/processar-rendimentos', (req, res) => {
   const { secret } = req.body;
   if (secret !== process.env.CRON_SECRET) {
-    return res.status(401).json({ error: 'Acesso não autorizado." });
+    // A LINHA ABAIXO FOI CORRIGIDA
+    return res.status(401).json({ error: 'Acesso não autorizado.' });
   }
   res.status(202).json({ message: "Processamento de rendimentos iniciado em segundo plano." });
   processDailyYields(); 
