@@ -1,4 +1,4 @@
-// Arquivo: src/index.js (do Backend) - VERSÃO FINAL ANTI-TIMEOUT
+// Arquivo: src/index.js (do Backend) - ROTA DE DADOS ATUALIZADA
 
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
@@ -12,7 +12,7 @@ const app = express();
 const prisma = new PrismaClient();
 const saltRounds = 10;
 
-// ... (todas as suas rotas /criar-usuario, /login, etc. continuam aqui exatamente como antes) ...
+// ... (todas as outras rotas /criar-usuario, /login, etc. continuam aqui exatamente como antes) ...
 app.use(cors());
 app.use(express.json());
 // Rota de teste
@@ -47,8 +47,38 @@ app.post('/login', async (req, res) => {
     res.status(200).json({ message: 'Login bem-sucedido!', user: userWithoutPassword, token: token });
   } catch (error) { res.status(500).json({ error: 'Ocorreu um erro interno no servidor.' }); }
 });
-// Rota PROTEGIDA para BUSCAR DADOS DO USUÁRIO LOGADO
-app.get('/meus-dados', protect, async (req, res) => { res.status(200).json(req.user); });
+
+// =================================================================
+// ROTA PROTEGIDA ATUALIZADA PARA INCLUIR DADOS DA CARTEIRA
+// =================================================================
+app.get('/meus-dados', protect, async (req, res) => {
+    try {
+        const userId = req.user.id;
+
+        // Agora, buscamos o usuário E incluímos sua carteira na mesma consulta
+        const userWithWallet = await prisma.user.findUnique({
+            where: { id: userId },
+            include: {
+                wallet: true, // A MÁGICA ACONTECE AQUI!
+            },
+        });
+
+        if (!userWithWallet) {
+            return res.status(404).json({ error: 'Usuário não encontrado.' });
+        }
+        
+        // Remove a senha da resposta por segurança
+        delete userWithWallet.password;
+
+        res.status(200).json(userWithWallet);
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: "Não foi possível buscar os dados do usuário."})
+    }
+});
+
+
 // Rota PÚBLICA para LISTAR OS PLANOS DE INVESTIMENTO
 app.get('/planos', async (req, res) => {
   try {
@@ -80,22 +110,13 @@ app.get('/meus-investimentos', protect, async (req, res) => {
     res.status(500).json({ error: 'Não foi possível buscar os investimentos.' });
   }
 });
-
-
-// =================================================================
 // ROTA SECRETA ATUALIZADA PARA NÃO DAR TIMEOUT
-// =================================================================
 app.post('/processar-rendimentos', (req, res) => {
   const { secret } = req.body;
   if (secret !== process.env.CRON_SECRET) {
     return res.status(401).json({ error: 'Acesso não autorizado.' });
   }
-
-  // Responde IMEDIATAMENTE para o cron-job.org
   res.status(202).json({ message: "Processamento de rendimentos iniciado em segundo plano." });
-
-  // Inicia o trabalho pesado DEPOIS de já ter respondido.
-  // Não usamos "await" aqui de propósito!
   processDailyYields(); 
 });
 
