@@ -1,5 +1,4 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
+// Arquivo: prisma/schema.prisma
 
 generator client {
   provider = "prisma-client-js"
@@ -10,13 +9,36 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Nosso primeiro "Modelo" de dados.
-// Isso vai criar uma tabela chamada "User" no banco de dados.
 model User {
+  id          Int      @id @default(autoincrement())
+  email       String   @unique
+  name        String?
+  password    String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  investments Investment[]
+}
+
+// TABELA DE PLANOS (SEM DURAÇÃO)
+model Plan {
+  id              Int      @id @default(autoincrement())
+  name            String   @unique
+  price           Float
+  dailyReturn     Float
+  
+  investments     Investment[]
+}
+
+// TABELA DE INVESTIMENTOS (SEM DATA FINAL)
+model Investment {
   id        Int      @id @default(autoincrement())
-  email     String   @unique
-  name      String?
-  password  String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  startDate DateTime @default(now())
+  status    String   @default("ACTIVE")
+
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
+  
+  planId    Int
+  plan      Plan     @relation(fields: [planId], references: [id])
 }

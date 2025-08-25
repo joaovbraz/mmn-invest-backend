@@ -5,7 +5,7 @@ import { PrismaClient } from '@prisma/client';
 import cors from 'cors';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
-import { protect } from './authMiddleware.js'; // <-- IMPORTAMOS O "SEGURANÇA"
+import { protect } from './authMiddleware.js';
 
 const app = express();
 const prisma = new PrismaClient();
@@ -59,16 +59,27 @@ app.post('/login', async (req, res) => {
   }
 });
 
-// =============================================================
-// NOVA ROTA PROTEGIDA PARA BUSCAR DADOS DO USUÁRIO LOGADO
-// =============================================================
+// Rota PROTEGIDA para BUSCAR DADOS DO USUÁRIO LOGADO
 app.get('/meus-dados', protect, async (req, res) => {
-  // Se o código chegou até aqui, o middleware 'protect' já validou o token
-  // e colocou os dados do usuário (sem a senha) em 'req.user'.
-
-  // Apenas retornamos os dados do usuário que o middleware já encontrou.
   res.status(200).json(req.user);
 });
+
+// =============================================================
+// NOVA ROTA PÚBLICA PARA LISTAR OS PLANOS DE INVESTIMENTO
+// =============================================================
+app.get('/planos', async (req, res) => {
+  try {
+    const planos = await prisma.plan.findMany({
+      orderBy: {
+        price: 'asc' // Ordena os planos do mais barato para o mais caro
+      }
+    });
+    res.status(200).json(planos);
+  } catch (error) {
+    res.status(500).json({ error: 'Não foi possível buscar os planos.' });
+  }
+});
+
 
 const PORT = process.env.PORT || 3333;
 app.listen(PORT, () => {
