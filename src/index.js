@@ -1,5 +1,3 @@
-// Arquivo: src/index.js (do Backend) - VERSÃO COMPLETA DE DEPURAÇÃO DO LOGIN
-
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
 import cors from 'cors';
@@ -30,10 +28,7 @@ async function updateUserRank(userId) {
 app.use(cors());
 app.use(express.json());
 
-// Rota de teste
 app.get('/', (req, res) => { res.json({ message: 'API do TDP INVEST funcionando!' }); });
-
-// Rota para CRIAR USUÁRIO
 app.post('/criar-usuario', async (req, res) => {
   const { email, name, password, referrerCode } = req.body;
   try {
@@ -55,45 +50,34 @@ app.post('/criar-usuario', async (req, res) => {
     res.status(400).json({ error: 'Não foi possível completar o cadastro.' });
   }
 });
-
-// ROTA DE LOGIN COM "ESPIÕES" DE DEPURAÇÃO
 app.post('/login', async (req, res) => {
   console.log("LOG DE DEBUG 1: Rota /login foi acionada.");
   try {
     const { email, password } = req.body;
-
     console.log("LOG DE DEBUG 2: Buscando usuário no banco de dados...");
     const user = await prisma.user.findUnique({ where: { email } });
     console.log("LOG DE DEBUG 3: Busca no banco de dados concluída.");
-
     if (!user) {
       console.log("LOG DE DEBUG 4: Usuário não encontrado. Enviando erro.");
       return res.status(404).json({ error: 'Usuário ou senha inválidos.' });
     }
-
     console.log("LOG DE DEBUG 5: Comparando a senha...");
     const isPasswordValid = await bcrypt.compare(password, user.password);
     console.log("LOG DE DEBUG 6: Comparação de senha concluída.");
-
     if (!isPasswordValid) {
       console.log("LOG DE DEBUG 7: Senha incorreta. Enviando erro.");
       return res.status(401).json({ error: 'Usuário ou senha inválidos.' });
     }
-
     console.log("LOG DE DEBUG 8: Gerando o token...");
     const token = jwt.sign({ userId: user.id, email: user.email }, process.env.JWT_SECRET, { expiresIn: '8h' });
     console.log("LOG DE DEBUG 9: Token gerado. Enviando resposta de sucesso.");
-
     const { password: _, ...userWithoutPassword } = user;
     res.status(200).json({ message: 'Login bem-sucedido!', user: userWithoutPassword, token: token });
-
   } catch (error) {
     console.error("LOG DE DEBUG ERRO FATAL:", error);
     res.status(500).json({ error: 'Ocorreu um erro interno no servidor.' });
   }
 });
-
-// Rota PROTEGIDA para BUSCAR DADOS DO USUÁRIO LOGADO
 app.get('/meus-dados', protect, async (req, res) => {
     try {
         const userId = req.user.id;
@@ -106,16 +90,12 @@ app.get('/meus-dados', protect, async (req, res) => {
         res.status(500).json({ error: "Não foi possível buscar os dados do usuário."})
     }
 });
-
-// Rota PÚBLICA para LISTAR OS PLANOS DE INVESTIMENTO
 app.get('/planos', async (req, res) => {
   try {
     const planos = await prisma.plan.findMany({ orderBy: { price: 'asc' } });
     res.status(200).json(planos);
   } catch (error) { res.status(500).json({ error: 'Não foi possível buscar os planos.' }); }
 });
-
-// Rota PROTEGIDA para CRIAR UM NOVO INVESTIMENTO
 app.post('/investimentos', protect, async (req, res) => {
   try {
     const investingUser = req.user;
@@ -142,8 +122,6 @@ app.post('/investimentos', protect, async (req, res) => {
     res.status(500).json({ error: 'Não foi possível processar o investimento.' });
   }
 });
-
-// Rota PROTEGIDA para LISTAR OS INVESTIMENTOS DO USUÁRIO
 app.get('/meus-investimentos', protect, async (req, res) => {
   try {
     const userId = req.user.id;
@@ -154,8 +132,6 @@ app.get('/meus-investimentos', protect, async (req, res) => {
     res.status(500).json({ error: 'Não foi possível buscar os investimentos.' });
   }
 });
-
-// Rota PROTEGIDA para CONTAR OS AFILIADOS
 app.get('/minha-rede', protect, async (req, res) => {
   try {
     const userId = req.user.id;
@@ -166,8 +142,6 @@ app.get('/minha-rede', protect, async (req, res) => {
     res.status(500).json({ error: "Não foi possível buscar os dados da rede." });
   }
 });
-
-// Rota PROTEGIDA para LISTAR OS DETALHES DOS AFILIADOS
 app.get('/minha-rede-detalhes', protect, async (req, res) => {
   try {
     const userId = req.user.id;
@@ -178,8 +152,6 @@ app.get('/minha-rede-detalhes', protect, async (req, res) => {
     res.status(500).json({ error: "Não foi possível buscar os detalhes da rede." });
   }
 });
-
-// Rota PROTEGIDA para BUSCAR O EXTRATO DE TRANSAÇÕES
 app.get('/meu-extrato', protect, async (req, res) => {
   try {
     const userId = req.user.id;
@@ -192,8 +164,6 @@ app.get('/meu-extrato', protect, async (req, res) => {
     res.status(500).json({ error: "Não foi possível buscar o extrato." });
   }
 });
-
-// Rota PROTEGIDA para CRIAR UM PEDIDO DE SAQUE
 app.post('/saques', protect, async (req, res) => {
   try {
     const userId = req.user.id;
@@ -210,8 +180,6 @@ app.post('/saques', protect, async (req, res) => {
     res.status(500).json({ error: "Não foi possível processar a solicitação de saque." });
   }
 });
-
-// Rota PROTEGIDA para LISTAR O HISTÓRICO DE SAQUES
 app.get('/saques', protect, async (req, res) => {
   try {
     const userId = req.user.id;
@@ -222,15 +190,12 @@ app.get('/saques', protect, async (req, res) => {
     res.status(500).json({ error: "Não foi possível buscar o histórico de saques." });
   }
 });
-
-// ROTAS DE ADMINISTRAÇÃO
 app.get('/admin/saques', protect, admin, async (req, res) => {
   try {
     const pendingWithdrawals = await prisma.withdrawal.findMany({ where: { status: 'PENDING' }, orderBy: { createdAt: 'asc' }, include: { user: { select: { name: true, email: true } } } });
     res.status(200).json(pendingWithdrawals);
   } catch (error) { res.status(500).json({ error: 'Erro ao buscar saques pendentes.' }); }
 });
-
 app.post('/admin/saques/:id/aprovar', protect, admin, async (req, res) => {
   try {
     const withdrawalId = parseInt(req.params.id);
@@ -260,7 +225,6 @@ app.post('/admin/saques/:id/aprovar', protect, admin, async (req, res) => {
     res.status(400).json({ error: error.message });
   }
 });
-
 app.post('/admin/saques/:id/rejeitar', protect, admin, async (req, res) => {
   try {
     const withdrawalId = parseInt(req.params.id);
@@ -274,8 +238,6 @@ app.post('/admin/saques/:id/rejeitar', protect, admin, async (req, res) => {
     res.status(400).json({ error: error.message });
   }
 });
-
-// ROTA SECRETA
 app.post('/processar-rendimentos', (req, res) => {
   const { secret } = req.body;
   if (secret !== process.env.CRON_SECRET) {
