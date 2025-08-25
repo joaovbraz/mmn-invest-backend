@@ -18,19 +18,18 @@ model User {
   updatedAt   DateTime @updatedAt
   
   investments Investment[]
+  wallet      Wallet?      // Relação: Um usuário tem uma carteira
 }
 
-// TABELA DE PLANOS (SEM DURAÇÃO)
 model Plan {
-  id              Int      @id @default(autoincrement())
-  name            String   @unique
-  price           Float
-  dailyReturn     Float
+  id            Int      @id @default(autoincrement())
+  name          String   @unique
+  price         Float
+  dailyReturn   Float
   
-  investments     Investment[]
+  investments   Investment[]
 }
 
-// TABELA DE INVESTIMENTOS (SEM DATA FINAL)
 model Investment {
   id        Int      @id @default(autoincrement())
   startDate DateTime @default(now())
@@ -41,4 +40,28 @@ model Investment {
   
   planId    Int
   plan      Plan     @relation(fields: [planId], references: [id])
+}
+
+// NOVA TABELA PARA A CARTEIRA DO USUÁRIO
+model Wallet {
+  id                  Int      @id @default(autoincrement())
+  balance             Float    @default(0.0) // Saldo de rendimentos
+  referralBalance     Float    @default(0.0) // Saldo de indicações
+
+  userId              Int      @unique // Garante que um usuário só pode ter uma carteira
+  user                User     @relation(fields: [userId], references: [id])
+
+  transactions        Transaction[] // Relação: Uma carteira tem várias transações
+}
+
+// NOVA TABELA PARA O EXTRATO DE TRANSAÇÕES
+model Transaction {
+  id                  Int      @id @default(autoincrement())
+  amount              Float    // Valor da transação (pode ser + ou -)
+  type                String   // Ex: "DAILY_YIELD", "REFERRAL_BONUS", "WITHDRAWAL"
+  description         String
+  createdAt           DateTime @default(now())
+
+  walletId            Int
+  wallet              Wallet   @relation(fields: [walletId], references: [id])
 }

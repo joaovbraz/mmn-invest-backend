@@ -18,8 +18,48 @@ app.use(express.json());
 // Rota de teste
 app.get('/', (req, res) => { res.json({ message: 'API do TDP INVEST funcionando!' }); });
 
-// Rota para CRIAR USUÁRIO
-app.post('/criar-usuario', async (req, res) => { /* ...código existente sem alterações... */ });
+// =============================================================
+// ROTA PARA CRIAR USUÁRIO (ATUALIZADA PARA CRIAR CARTEIRA)
+// =============================================================
+app.post('/criar-usuario', async (req, res) => {
+  const { email, name, password } = req.body;
+  try {
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
+
+    // Usamos uma "transação" para garantir que ou tudo dá certo, ou nada é criado.
+    const newUser = await prisma.$transaction(async (prisma) => {
+      // 1. Cria o usuário
+      const user = await prisma.user.create({
+        data: {
+          email,
+          name,
+          password: hashedPassword,
+        },
+      });
+
+      // 2. Cria a carteira vinculada ao novo usuário
+      await prisma.wallet.create({
+        data: {
+          userId: user.id,
+          // Saldos já começam com 0 por padrão
+        },
+      });
+
+      return user;
+    });
+
+    const { password: _, ...userWithoutPassword } = newUser;
+    res.status(201).json(userWithoutPassword);
+
+  } catch (error) {
+    // Verifica se o erro é de email duplicado
+    if (error.code === 'P2002' && error.meta?.target?.includes('email')) {
+      return res.status(409).json({ error: 'Este email já está em uso.' });
+    }
+    console.error(error);
+    res.status(400).json({ error: 'Não foi possível completar o cadastro.' });
+  }
+});
 
 // Rota para LOGIN
 app.post('/login', async (req, res) => { /* ...código existente sem alterações... */ });
@@ -33,34 +73,8 @@ app.get('/planos', async (req, res) => { /* ...código existente sem alteraçõe
 // Rota PROTEGIDA para CRIAR UM NOVO INVESTIMENTO
 app.post('/investimentos', protect, async (req, res) => { /* ...código existente sem alterações... */ });
 
-
-// =============================================================
-// NOVA ROTA PROTEGIDA PARA LISTAR OS INVESTIMENTOS DO USUÁRIO
-// =============================================================
-app.get('/meus-investimentos', protect, async (req, res) => {
-  try {
-    const userId = req.user.id; // ID do usuário logado (vem do middleware 'protect')
-
-    // Busca todos os investimentos do usuário
-    const investimentos = await prisma.investment.findMany({
-      where: {
-        userId: userId, // Filtra para pegar apenas os do usuário logado
-      },
-      include: {
-        plan: true, // Inclui os detalhes do plano (nome, preço, etc.) em cada investimento
-      },
-      orderBy: {
-        startDate: 'desc' // Mostra os investimentos mais recentes primeiro
-      }
-    });
-
-    res.status(200).json(investimentos);
-
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Não foi possível buscar os investimentos.' });
-  }
-});
+// Rota PROTEGIDA para LISTAR OS INVESTIMENTOS DO USUÁRIO
+app.get('/meus-investimentos', protect, async (req, res) => { /* ...código existente sem alterações... */ });
 
 
 const PORT = process.env.PORT || 3333;
