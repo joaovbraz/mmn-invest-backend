@@ -1,4 +1,4 @@
-// Arquivo: prisma/schema.prisma - VERSÃO COM CARGO DE ADMIN
+// Arquivo: prisma/schema.prisma - VERSÃO CORRETA E COMPLETA
 
 generator client {
   provider = "prisma-client-js"
@@ -23,16 +23,13 @@ model User {
   referrals    User[]       @relation("Referrals")
   
   rank         String       @default("Bronze")
-  
-  // --- CAMPO NOVO PARA O CARGO ---
   role         String       @default("USER") // Cargos: USER, ADMIN
+  careerPoints Int          @default(0)      // Pontos por indicação
   
   investments  Investment[]
   wallet       Wallet?
   withdrawals  Withdrawal[]
 }
-
-// ... (o resto do schema.prisma continua exatamente o mesmo) ...
 
 model Plan {
   id            Int      @id @default(autoincrement())

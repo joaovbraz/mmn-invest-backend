@@ -1,3 +1,5 @@
+// Arquivo: src/index.js (do Backend) - VERSÃO COMPLETA E CORRIGIDA
+
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
 import cors from 'cors';
@@ -10,25 +12,13 @@ const app = express();
 const prisma = new PrismaClient();
 const saltRounds = 10;
 
-async function updateUserRank(userId) {
-  try {
-    const referralCount = await prisma.user.count({ where: { referrerId: userId } });
-    let newRank = "Bronze";
-    if (referralCount >= 50) { newRank = "Diamante"; }
-    else if (referralCount >= 20) { newRank = "Platina"; }
-    else if (referralCount >= 10) { newRank = "Ouro"; }
-    else if (referralCount >= 5) { newRank = "Prata"; }
-    await prisma.user.update({ where: { id: userId }, data: { rank: newRank } });
-    console.log(`Rank do usuário ${userId} verificado. Indicados: ${referralCount}. Novo Rank: ${newRank}.`);
-  } catch (error) {
-    console.error(`Erro ao atualizar rank do usuário ${userId}:`, error);
-  }
-}
-
 app.use(cors());
 app.use(express.json());
 
+// Rota de teste
 app.get('/', (req, res) => { res.json({ message: 'API do TDP INVEST funcionando!' }); });
+
+// Rota para CRIAR USUÁRIO (AGORA DÁ PONTOS AO PADRINHO)
 app.post('/criar-usuario', async (req, res) => {
   const { email, name, password, referrerCode } = req.body;
   try {
@@ -36,12 +26,18 @@ app.post('/criar-usuario', async (req, res) => {
     let referrerId = null;
     if (referrerCode) {
       const referrer = await prisma.user.findUnique({ where: { referralCode: referrerCode } });
-      if (referrer) { referrerId = referrer.id; }
+      if (referrer) {
+        referrerId = referrer.id;
+        await prisma.user.update({
+          where: { id: referrerId },
+          data: { careerPoints: { increment: 10 } },
+        });
+        console.log(`+10 pontos de carreira para o usuário ${referrerId}`);
+      }
     }
     const newReferralCode = (name.substring(0, 4).toUpperCase() || 'USER') + Math.random().toString().slice(2, 7);
-    const user = await prisma.user.create({ data: { email, name, password: hashedPassword, referralCode: newReferralCode, referrerId: referrerId, role: 'USER', rank: 'Bronze' } });
+    const user = await prisma.user.create({ data: { email, name, password: hashedPassword, referralCode: newReferralCode, referrerId: referrerId } });
     await prisma.wallet.create({ data: { userId: user.id } });
-    if (referrerId) { updateUserRank(referrerId); }
     const { password: _, ...userWithoutPassword } = user;
     res.status(201).json(userWithoutPassword);
   } catch (error) {
@@ -50,34 +46,22 @@ app.post('/criar-usuario', async (req, res) => {
     res.status(400).json({ error: 'Não foi possível completar o cadastro.' });
   }
 });
+
+// Rota para LOGIN
 app.post('/login', async (req, res) => {
-  console.log("LOG DE DEBUG 1: Rota /login foi acionada.");
   try {
     const { email, password } = req.body;
-    console.log("LOG DE DEBUG 2: Buscando usuário no banco de dados...");
     const user = await prisma.user.findUnique({ where: { email } });
-    console.log("LOG DE DEBUG 3: Busca no banco de dados concluída.");
-    if (!user) {
-      console.log("LOG DE DEBUG 4: Usuário não encontrado. Enviando erro.");
-      return res.status(404).json({ error: 'Usuário ou senha inválidos.' });
-    }
-    console.log("LOG DE DEBUG 5: Comparando a senha...");
+    if (!user) { return res.status(404).json({ error: 'Usuário ou senha inválidos.' }); }
     const isPasswordValid = await bcrypt.compare(password, user.password);
-    console.log("LOG DE DEBUG 6: Comparação de senha concluída.");
-    if (!isPasswordValid) {
-      console.log("LOG DE DEBUG 7: Senha incorreta. Enviando erro.");
-      return res.status(401).json({ error: 'Usuário ou senha inválidos.' });
-    }
-    console.log("LOG DE DEBUG 8: Gerando o token...");
+    if (!isPasswordValid) { return res.status(401).json({ error: 'Usuário ou senha inválidos.' }); }
     const token = jwt.sign({ userId: user.id, email: user.email }, process.env.JWT_SECRET, { expiresIn: '8h' });
-    console.log("LOG DE DEBUG 9: Token gerado. Enviando resposta de sucesso.");
     const { password: _, ...userWithoutPassword } = user;
     res.status(200).json({ message: 'Login bem-sucedido!', user: userWithoutPassword, token: token });
-  } catch (error) {
-    console.error("LOG DE DEBUG ERRO FATAL:", error);
-    res.status(500).json({ error: 'Ocorreu um erro interno no servidor.' });
-  }
+  } catch (error) { res.status(500).json({ error: 'Ocorreu um erro interno no servidor.' }); }
 });
+
+// Rota PROTEGIDA para BUSCAR DADOS DO USUÁRIO LOGADO
 app.get('/meus-dados', protect, async (req, res) => {
     try {
         const userId = req.user.id;
@@ -90,21 +74,41 @@ app.get('/meus-dados', protect, async (req, res) => {
         res.status(500).json({ error: "Não foi possível buscar os dados do usuário."})
     }
 });
+
+// Rota PÚBLICA para LISTAR OS PLANOS DE INVESTIMENTO
 app.get('/planos', async (req, res) => {
   try {
     const planos = await prisma.plan.findMany({ orderBy: { price: 'asc' } });
     res.status(200).json(planos);
   } catch (error) { res.status(500).json({ error: 'Não foi possível buscar os planos.' }); }
 });
+
+// Rota PROTEGIDA para CRIAR UM NOVO INVESTIMENTO (AGORA ATUALIZA O RANK)
 app.post('/investimentos', protect, async (req, res) => {
   try {
-    const investingUser = req.user;
+    const investingUser = await prisma.user.findUnique({ where: { id: req.user.id } });
     const { planId } = req.body;
     if (!planId) { return res.status(400).json({ error: 'O ID do plano é obrigatório.' }); }
+    
     const result = await prisma.$transaction(async (prisma) => {
       const novoInvestimento = await prisma.investment.create({ data: { userId: investingUser.id, planId: planId } });
+      const plan = await prisma.plan.findUnique({ where: { id: planId } });
+
+      const rankHierarchy = { "Bronze": 1, "Prata": 2, "Ouro": 3, "Platina": 4, "Diamante": 5, "Lendário": 6 };
+      const planNameWithoutPrefix = plan.name.replace('Plano ', '');
+      
+      const currentUserRankLevel = rankHierarchy[investingUser.rank];
+      const purchasedPlanRankLevel = rankHierarchy[planNameWithoutPrefix];
+
+      if (purchasedPlanRankLevel > currentUserRankLevel) {
+        await prisma.user.update({
+          where: { id: investingUser.id },
+          data: { rank: planNameWithoutPrefix },
+        });
+        console.log(`PROMOÇÃO: Usuário ${investingUser.id} promovido para ${planNameWithoutPrefix}`);
+      }
+
       if (investingUser.referrerId) {
-        const plan = await prisma.plan.findUnique({ where: { id: planId } });
         const referrer = await prisma.user.findUnique({ where: { id: investingUser.referrerId }, include: { wallet: true } });
         if (referrer && referrer.wallet) {
           const commissionRate = 0.10;
@@ -122,6 +126,8 @@ app.post('/investimentos', protect, async (req, res) => {
     res.status(500).json({ error: 'Não foi possível processar o investimento.' });
   }
 });
+
+// Rota PROTEGIDA para LISTAR OS INVESTIMENTOS DO USUÁRIO
 app.get('/meus-investimentos', protect, async (req, res) => {
   try {
     const userId = req.user.id;
@@ -132,6 +138,8 @@ app.get('/meus-investimentos', protect, async (req, res) => {
     res.status(500).json({ error: 'Não foi possível buscar os investimentos.' });
   }
 });
+
+// Rota PROTEGIDA para CONTAR OS AFILIADOS
 app.get('/minha-rede', protect, async (req, res) => {
   try {
     const userId = req.user.id;
@@ -142,6 +150,8 @@ app.get('/minha-rede', protect, async (req, res) => {
     res.status(500).json({ error: "Não foi possível buscar os dados da rede." });
   }
 });
+
+// Rota PROTEGIDA para LISTAR OS DETALHES DOS AFILIADOS
 app.get('/minha-rede-detalhes', protect, async (req, res) => {
   try {
     const userId = req.user.id;
@@ -152,6 +162,8 @@ app.get('/minha-rede-detalhes', protect, async (req, res) => {
     res.status(500).json({ error: "Não foi possível buscar os detalhes da rede." });
   }
 });
+
+// Rota PROTEGIDA para BUSCAR O EXTRATO DE TRANSAÇÕES
 app.get('/meu-extrato', protect, async (req, res) => {
   try {
     const userId = req.user.id;
@@ -164,6 +176,8 @@ app.get('/meu-extrato', protect, async (req, res) => {
     res.status(500).json({ error: "Não foi possível buscar o extrato." });
   }
 });
+
+// Rota PROTEGIDA para CRIAR UM PEDIDO DE SAQUE
 app.post('/saques', protect, async (req, res) => {
   try {
     const userId = req.user.id;
@@ -180,6 +194,8 @@ app.post('/saques', protect, async (req, res) => {
     res.status(500).json({ error: "Não foi possível processar a solicitação de saque." });
   }
 });
+
+// Rota PROTEGIDA para LISTAR O HISTÓRICO DE SAQUES
 app.get('/saques', protect, async (req, res) => {
   try {
     const userId = req.user.id;
@@ -190,6 +206,8 @@ app.get('/saques', protect, async (req, res) => {
     res.status(500).json({ error: "Não foi possível buscar o histórico de saques." });
   }
 });
+
+// ROTAS DE ADMINISTRAÇÃO
 app.get('/admin/saques', protect, admin, async (req, res) => {
   try {
     const pendingWithdrawals = await prisma.withdrawal.findMany({ where: { status: 'PENDING' }, orderBy: { createdAt: 'asc' }, include: { user: { select: { name: true, email: true } } } });
@@ -238,6 +256,8 @@ app.post('/admin/saques/:id/rejeitar', protect, admin, async (req, res) => {
     res.status(400).json({ error: error.message });
   }
 });
+
+// ROTA SECRETA
 app.post('/processar-rendimentos', (req, res) => {
   const { secret } = req.body;
   if (secret !== process.env.CRON_SECRET) {
