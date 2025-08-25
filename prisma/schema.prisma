@@ -1,4 +1,4 @@
-// Arquivo: prisma/schema.prisma - VERSÃO COM SISTEMA DE INDICAÇÃO
+// Arquivo: prisma/schema.prisma - VERSÃO COM TABELA DE SAQUES
 
 generator client {
   provider = "prisma-client-js"
@@ -10,26 +10,21 @@ datasource db {
 }
 
 model User {
-  id          Int      @id @default(autoincrement())
-  email       String   @unique
-  name        String?
-  password    String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id           Int          @id @default(autoincrement())
+  email        String       @unique
+  name         String?
+  password     String
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
   
-  // --- CAMPOS NOVOS PARA O MMN ---
-  referralCode String?  @unique // O código único de convite deste usuário (ex: JOAO123)
+  referralCode String?      @unique
+  referrerId   Int?
+  referrer     User?        @relation("Referrals", fields: [referrerId], references: [id])
+  referrals    User[]       @relation("Referrals")
   
-  referrerId   Int?     // O ID do "padrinho" que convidou este usuário (opcional)
-  
-  // Relações de apadrinhamento
-  referrer     User?    @relation("Referrals", fields: [referrerId], references: [id]) // Quem é o meu padrinho
-  referrals    User[]   @relation("Referrals") // Quem são os meus afiliados
-  
-  
-  // Relações existentes
-  investments Investment[]
-  wallet      Wallet?
+  investments  Investment[]
+  wallet       Wallet?
+  withdrawals  Withdrawal[] // Relação: Um usuário pode ter vários pedidos de saque
 }
 
 model Plan {
@@ -37,7 +32,6 @@ model Plan {
   name          String   @unique
   price         Float
   dailyReturn   Float
-  
   investments   Investment[]
 }
 
@@ -45,32 +39,39 @@ model Investment {
   id        Int      @id @default(autoincrement())
   startDate DateTime @default(now())
   status    String   @default("ACTIVE")
-
   userId    Int
   user      User     @relation(fields: [userId], references: [id])
-  
   planId    Int
   plan      Plan     @relation(fields: [planId], references: [id])
 }
 
 model Wallet {
-  id                  Int      @id @default(autoincrement())
-  balance             Float    @default(0.0)
-  referralBalance     Float    @default(0.0)
-
-  userId              Int      @unique
-  user                User     @relation(fields: [userId], references: [id])
-
-  transactions        Transaction[]
+  id              Int      @id @default(autoincrement())
+  balance         Float    @default(0.0)
+  referralBalance Float    @default(0.0)
+  userId          Int      @unique
+  user            User     @relation(fields: [userId], references: [id])
+  transactions    Transaction[]
 }
 
 model Transaction {
-  id                  Int      @id @default(autoincrement())
-  amount              Float
-  type                String
-  description         String
-  createdAt           DateTime @default(now())
+  id          Int      @id @default(autoincrement())
+  amount      Float
+  type        String
+  description String
+  createdAt   DateTime @default(now())
+  walletId    Int
+  wallet      Wallet   @relation(fields: [walletId], references: [id])
+}
 
-  walletId            Int
-  wallet              Wallet   @relation(fields: [walletId], references: [id])
+// NOVA TABELA PARA OS PEDIDOS DE SAQUE
+model Withdrawal {
+  id        Int      @id @default(autoincrement())
+  amount    Float    // O valor que o usuário pediu para sacar
+  status    String   @default("PENDING") // Status: PENDING, APPROVED, REJECTED
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
 }

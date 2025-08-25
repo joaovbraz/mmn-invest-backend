@@ -1,4 +1,4 @@
-// Arquivo: src/index.js (do Backend) - COM DETALHES DA REDE
+// Arquivo: src/index.js (do Backend) - COM SOLICITAÇÃO DE SAQUE
 
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
@@ -123,13 +123,24 @@ app.get('/minha-rede', protect, async (req, res) => {
     res.status(500).json({ error: "Não foi possível buscar os dados da rede." });
   }
 });
+// Rota PROTEGIDA para LISTAR OS DETALHES DOS AFILIADOS
+app.get('/minha-rede-detalhes', protect, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const referrals = await prisma.user.findMany({ where: { referrerId: userId }, orderBy: { createdAt: 'desc' }, select: { id: true, name: true, email: true, createdAt: true, } });
+    res.status(200).json(referrals);
+  } catch (error) {
+    console.error("Erro ao buscar detalhes da rede:", error);
+    res.status(500).json({ error: "Não foi possível buscar os detalhes da rede." });
+  }
+});
 // Rota PROTEGIDA para BUSCAR O EXTRATO DE TRANSAÇÕES
 app.get('/meu-extrato', protect, async (req, res) => {
   try {
     const userId = req.user.id;
     const wallet = await prisma.wallet.findUnique({ where: { userId: userId } });
     if (!wallet) { return res.status(404).json({ error: "Carteira do usuário não encontrada." }); }
-    const transactions = await prisma.transaction.findMany({ where: { walletId: wallet.id }, orderBy: { createdAt: 'desc' } });
+    const transactions = await prisma.transaction.findMany({ where: { walletId: wallet.id }, orderBy: { createdAt: 'desc' }, });
     res.status(200).json(transactions);
   } catch (error) {
     console.error("Erro ao buscar extrato:", error);
@@ -138,34 +149,46 @@ app.get('/meu-extrato', protect, async (req, res) => {
 });
 
 // =================================================================
-// NOVA ROTA PROTEGIDA PARA LISTAR OS DETALHES DOS AFILIADOS
+// NOVA ROTA PROTEGIDA PARA CRIAR UM PEDIDO DE SAQUE
 // =================================================================
-app.get('/minha-rede-detalhes', protect, async (req, res) => {
+app.post('/saques', protect, async (req, res) => {
   try {
     const userId = req.user.id;
+    const { amount } = req.body;
 
-    // Busca todos os usuários que têm este userId como seu 'referrerId'
-    const referrals = await prisma.user.findMany({
-      where: {
-        referrerId: userId,
-      },
-      orderBy: {
-        createdAt: 'desc', // Mostra os indicados mais recentes primeiro
-      },
-      // Selecionamos apenas os campos seguros para não expor a senha, etc.
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        createdAt: true,
+    // Validação: verifica se o valor é um número positivo
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ error: "O valor do saque deve ser positivo." });
+    }
+
+    // Busca a carteira do usuário
+    const wallet = await prisma.wallet.findUnique({ where: { userId: userId } });
+    if (!wallet) {
+      return res.status(404).json({ error: "Carteira não encontrada." });
+    }
+
+    // Calcula o saldo total disponível
+    const totalBalance = wallet.balance + wallet.referralBalance;
+
+    // Validação: verifica se o usuário tem saldo suficiente
+    if (amount > totalBalance) {
+      return res.status(400).json({ error: "Saldo insuficiente para realizar o saque." });
+    }
+
+    // Cria o pedido de saque no banco de dados com status PENDENTE
+    const newWithdrawal = await prisma.withdrawal.create({
+      data: {
+        amount: amount,
+        userId: userId,
+        // status já é 'PENDING' por padrão
       }
     });
 
-    res.status(200).json(referrals);
+    res.status(201).json(newWithdrawal);
 
   } catch (error) {
-    console.error("Erro ao buscar detalhes da rede:", error);
-    res.status(500).json({ error: "Não foi possível buscar os detalhes da rede." });
+    console.error("Erro ao criar pedido de saque:", error);
+    res.status(500).json({ error: "Não foi possível processar a solicitação de saque." });
   }
 });
 
