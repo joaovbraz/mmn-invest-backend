@@ -1,4 +1,4 @@
-// Arquivo: prisma/schema.prisma - VERSÃO COM PLANO DE CARREIRA
+// Arquivo: prisma/schema.prisma - VERSÃO COM CARGO DE ADMIN
 
 generator client {
   provider = "prisma-client-js"
@@ -22,8 +22,10 @@ model User {
   referrer     User?        @relation("Referrals", fields: [referrerId], references: [id])
   referrals    User[]       @relation("Referrals")
   
-  // --- CAMPO NOVO PARA O PLANO DE CARREIRA ---
-  rank         String       @default("Bronze") // Guarda o rank atual do usuário
+  rank         String       @default("Bronze")
+  
+  // --- CAMPO NOVO PARA O CARGO ---
+  role         String       @default("USER") // Cargos: USER, ADMIN
   
   investments  Investment[]
   wallet       Wallet?
