@@ -1,4 +1,4 @@
-// Arquivo: src/index.js (do Backend) - COM PAGAMENTO DE BÔNUS DE INDICAÇÃO
+// Arquivo: src/index.js (do Backend) - COM CONTAGEM DE AFILIADOS
 
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
@@ -72,74 +72,33 @@ app.get('/planos', async (req, res) => {
     res.status(200).json(planos);
   } catch (error) { res.status(500).json({ error: 'Não foi possível buscar os planos.' }); }
 });
-
-// =================================================================
-// ROTA DE INVESTIMENTO ATUALIZADA PARA PAGAR BÔNUS DE INDICAÇÃO
-// =================================================================
+// Rota PROTEGIDA para CRIAR UM NOVO INVESTIMENTO
 app.post('/investimentos', protect, async (req, res) => {
   try {
-    const investingUser = req.user; // O usuário que está comprando o plano
+    const investingUser = req.user;
     const { planId } = req.body;
-
-    if (!planId) {
-      return res.status(400).json({ error: 'O ID do plano é obrigatório.' });
-    }
-
-    // Usamos uma transação para garantir que tudo aconteça junto
+    if (!planId) { return res.status(400).json({ error: 'O ID do plano é obrigatório.' }); }
     const result = await prisma.$transaction(async (prisma) => {
-      // 1. CRIA O INVESTIMENTO PARA O AFILIADO (como antes)
-      const novoInvestimento = await prisma.investment.create({
-        data: {
-          userId: investingUser.id,
-          planId: planId,
-        }
-      });
-
-      // 2. VERIFICA SE O AFILIADO TEM UM PADRINHO
+      const novoInvestimento = await prisma.investment.create({ data: { userId: investingUser.id, planId: planId } });
       if (investingUser.referrerId) {
         const plan = await prisma.plan.findUnique({ where: { id: planId } });
-        const referrer = await prisma.user.findUnique({
-          where: { id: investingUser.referrerId },
-          include: { wallet: true }, // Pega a carteira do padrinho
-        });
-
-        // Se o padrinho e a carteira dele existem...
+        const referrer = await prisma.user.findUnique({ where: { id: investingUser.referrerId }, include: { wallet: true } });
         if (referrer && referrer.wallet) {
-          // 3. CALCULA E PAGA A COMISSÃO
-          const commissionRate = 0.10; // 10%
+          const commissionRate = 0.10;
           const commissionAmount = plan.price * commissionRate;
-
-          // Deposita a comissão no saldo de indicações do padrinho
-          await prisma.wallet.update({
-            where: { id: referrer.wallet.id },
-            data: {
-              referralBalance: { increment: commissionAmount }
-            }
-          });
-
-          // Cria um registro da transação para o extrato do padrinho
-          await prisma.transaction.create({
-            data: {
-              walletId: referrer.wallet.id,
-              amount: commissionAmount,
-              type: 'REFERRAL_BONUS',
-              description: `Bônus de indicação pelo investimento de ${investingUser.name} no ${plan.name}`,
-            }
-          });
+          await prisma.wallet.update({ where: { id: referrer.wallet.id }, data: { referralBalance: { increment: commissionAmount } } });
+          await prisma.transaction.create({ data: { walletId: referrer.wallet.id, amount: commissionAmount, type: 'REFERRAL_BONUS', description: `Bônus de indicação pelo investimento de ${investingUser.name} no ${plan.name}` } });
           console.log(`Bônus de R$ ${commissionAmount} pago para o usuário ${referrer.id}`);
         }
       }
       return novoInvestimento;
     });
-
     res.status(201).json(result);
-
   } catch (error) {
     console.error("Erro ao processar investimento e bônus:", error);
     res.status(500).json({ error: 'Não foi possível processar o investimento.' });
   }
 });
-
 // Rota PROTEGIDA para LISTAR OS INVESTIMENTOS DO USUÁRIO
 app.get('/meus-investimentos', protect, async (req, res) => {
   try {
@@ -151,6 +110,29 @@ app.get('/meus-investimentos', protect, async (req, res) => {
     res.status(500).json({ error: 'Não foi possível buscar os investimentos.' });
   }
 });
+
+// =================================================================
+// NOVA ROTA PROTEGIDA PARA CONTAR OS AFILIADOS
+// =================================================================
+app.get('/minha-rede', protect, async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    // Comando do Prisma para contar quantos usuários têm este userId como seu 'referrerId'
+    const referralCount = await prisma.user.count({
+      where: {
+        referrerId: userId,
+      }
+    });
+
+    res.status(200).json({ count: referralCount });
+  } catch (error) {
+    console.error("Erro ao contar afiliados:", error);
+    res.status(500).json({ error: "Não foi possível buscar os dados da rede." });
+  }
+});
+
+
 // ROTA SECRETA ATUALIZADA PARA NÃO DAR TIMEOUT
 app.post('/processar-rendimentos', (req, res) => {
   const { secret } = req.body;
