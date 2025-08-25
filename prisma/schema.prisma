@@ -1,4 +1,4 @@
-// Arquivo: prisma/schema.prisma
+// Arquivo: prisma/schema.prisma - VERSÃO COM SISTEMA DE INDICAÇÃO
 
 generator client {
   provider = "prisma-client-js"
@@ -17,8 +17,19 @@ model User {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   
+  // --- CAMPOS NOVOS PARA O MMN ---
+  referralCode String?  @unique // O código único de convite deste usuário (ex: JOAO123)
+  
+  referrerId   Int?     // O ID do "padrinho" que convidou este usuário (opcional)
+  
+  // Relações de apadrinhamento
+  referrer     User?    @relation("Referrals", fields: [referrerId], references: [id]) // Quem é o meu padrinho
+  referrals    User[]   @relation("Referrals") // Quem são os meus afiliados
+  
+  
+  // Relações existentes
   investments Investment[]
-  wallet      Wallet?      // Relação: Um usuário tem uma carteira
+  wallet      Wallet?
 }
 
 model Plan {
@@ -42,23 +53,21 @@ model Investment {
   plan      Plan     @relation(fields: [planId], references: [id])
 }
 
-// NOVA TABELA PARA A CARTEIRA DO USUÁRIO
 model Wallet {
   id                  Int      @id @default(autoincrement())
-  balance             Float    @default(0.0) // Saldo de rendimentos
-  referralBalance     Float    @default(0.0) // Saldo de indicações
+  balance             Float    @default(0.0)
+  referralBalance     Float    @default(0.0)
 
-  userId              Int      @unique // Garante que um usuário só pode ter uma carteira
+  userId              Int      @unique
   user                User     @relation(fields: [userId], references: [id])
 
-  transactions        Transaction[] // Relação: Uma carteira tem várias transações
+  transactions        Transaction[]
 }
 
-// NOVA TABELA PARA O EXTRATO DE TRANSAÇÕES
 model Transaction {
   id                  Int      @id @default(autoincrement())
-  amount              Float    // Valor da transação (pode ser + ou -)
-  type                String   // Ex: "DAILY_YIELD", "REFERRAL_BONUS", "WITHDRAWAL"
+  amount              Float
+  type                String
   description         String
   createdAt           DateTime @default(now())
 

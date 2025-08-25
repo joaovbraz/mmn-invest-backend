@@ -1,4 +1,4 @@
-// Arquivo: src/index.js (do Backend) - ROTA DE DADOS ATUALIZADA
+// Arquivo: src/index.js (do Backend) - CADASTRO COM LÓGICA DE INDICAÇÃO
 
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
@@ -12,20 +12,58 @@ const app = express();
 const prisma = new PrismaClient();
 const saltRounds = 10;
 
-// ... (todas as outras rotas /criar-usuario, /login, etc. continuam aqui exatamente como antes) ...
 app.use(cors());
 app.use(express.json());
+
 // Rota de teste
 app.get('/', (req, res) => { res.json({ message: 'API do TDP INVEST funcionando!' }); });
-// Rota para CRIAR USUÁRIO
+
+// =================================================================
+// ROTA DE CADASTRO ATUALIZADA COM LÓGICA DE MMN
+// =================================================================
 app.post('/criar-usuario', async (req, res) => {
-  const { email, name, password } = req.body;
+  // Agora também recebemos o código de quem indicou (se houver)
+  const { email, name, password, referrerCode } = req.body;
+  
   try {
     const hashedPassword = await bcrypt.hash(password, saltRounds);
-    const user = await prisma.user.create({ data: { email, name, password: hashedPassword } });
-    await prisma.wallet.create({ data: { userId: user.id } });
+    
+    let referrerId = null;
+
+    // 1. VERIFICA SE VEIO UM CÓDIGO DE INDICAÇÃO
+    if (referrerCode) {
+      const referrer = await prisma.user.findUnique({
+        where: { referralCode: referrerCode },
+      });
+      
+      // Se encontramos o "padrinho", guardamos o ID dele
+      if (referrer) {
+        referrerId = referrer.id;
+      }
+    }
+
+    // 2. GERA UM CÓDIGO DE INDICAÇÃO ÚNICO PARA O NOVO USUÁRIO
+    // Pega os 4 primeiros caracteres do nome, coloca em maiúsculo e adiciona 5 números aleatórios
+    const newReferralCode = (name.substring(0, 4).toUpperCase() || 'USER') + Math.random().toString().slice(2, 7);
+
+    // 3. CRIA O USUÁRIO E A CARTEIRA
+    const user = await prisma.user.create({
+      data: {
+        email,
+        name,
+        password: hashedPassword,
+        referralCode: newReferralCode, // Salva o código de indicação dele
+        referrerId: referrerId,       // Salva o ID do padrinho (ou null se não houver)
+      },
+    });
+
+    await prisma.wallet.create({
+      data: { userId: user.id },
+    });
+
     const { password: _, ...userWithoutPassword } = user;
     res.status(201).json(userWithoutPassword);
+
   } catch (error) {
     if (error.code === 'P2002' && error.meta?.target?.includes('email')) {
       return res.status(409).json({ error: 'Este email já está em uso.' });
@@ -34,6 +72,9 @@ app.post('/criar-usuario', async (req, res) => {
     res.status(400).json({ error: 'Não foi possível completar o cadastro.' });
   }
 });
+
+
+// ... (todas as outras rotas /login, /planos, etc. continuam aqui exatamente como antes) ...
 // Rota para LOGIN
 app.post('/login', async (req, res) => {
   try {
@@ -47,38 +88,21 @@ app.post('/login', async (req, res) => {
     res.status(200).json({ message: 'Login bem-sucedido!', user: userWithoutPassword, token: token });
   } catch (error) { res.status(500).json({ error: 'Ocorreu um erro interno no servidor.' }); }
 });
-
-// =================================================================
-// ROTA PROTEGIDA ATUALIZADA PARA INCLUIR DADOS DA CARTEIRA
-// =================================================================
-app.get('/meus-dados', protect, async (req, res) => {
+// Rota PROTEGIDA para BUSCAR DADOS DO USUÁRIO LOGADO
+app.get('/meus-dados', async (req, res) => {
     try {
-        const userId = req.user.id;
-
-        // Agora, buscamos o usuário E incluímos sua carteira na mesma consulta
-        const userWithWallet = await prisma.user.findUnique({
-            where: { id: userId },
-            include: {
-                wallet: true, // A MÁGICA ACONTECE AQUI!
-            },
-        });
-
-        if (!userWithWallet) {
-            return res.status(404).json({ error: 'Usuário não encontrado.' });
-        }
-        
-        // Remove a senha da resposta por segurança
+        const token = req.headers.authorization.split(' ')[1];
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const userId = decoded.userId;
+        const userWithWallet = await prisma.user.findUnique({ where: { id: userId }, include: { wallet: true } });
+        if (!userWithWallet) { return res.status(404).json({ error: 'Usuário não encontrado.' }); }
         delete userWithWallet.password;
-
         res.status(200).json(userWithWallet);
-
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: "Não foi possível buscar os dados do usuário."})
     }
 });
-
-
 // Rota PÚBLICA para LISTAR OS PLANOS DE INVESTIMENTO
 app.get('/planos', async (req, res) => {
   try {
