@@ -1,11 +1,13 @@
-// Arquivo: src/index.js (do Backend)
+// Arquivo: src/index.js (do Backend) - VERSÃO SEGURA
 
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
 import cors from 'cors';
+import bcrypt from 'bcrypt'; // <-- 1. IMPORTAMOS O BCRYPT
 
 const app = express();
 const prisma = new PrismaClient();
+const saltRounds = 10; // Fator de segurança para a criptografia
 
 // Middlewares
 app.use(cors());
@@ -16,52 +18,51 @@ app.get('/', (req, res) => {
   res.json({ message: 'API do TDP INVEST funcionando!' });
 });
 
-// Rota para CRIAR USUÁRIO (já tínhamos)
+// Rota para CRIAR USUÁRIO (ATUALIZADA COM CRIPTOGRAFIA)
 app.post('/criar-usuario', async (req, res) => {
   try {
     const { email, name, password } = req.body;
+
+    // CRIPTOGRAFA A SENHA ANTES DE SALVAR
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
 
     const novoUsuario = await prisma.user.create({
       data: {
         email,
         name,
-        password, // ATENÇÃO: No futuro, vamos criptografar isso!
+        password: hashedPassword, // <-- 2. SALVAMOS A SENHA CRIPTOGRAFADA
       },
     });
 
-    res.status(201).json(novoUsuario);
+    const { password: _, ...userWithoutPassword } = novoUsuario;
+    res.status(201).json(userWithoutPassword);
+
   } catch (error) {
     res.status(400).json({ error: error.message });
   }
 });
 
-// =============================================================
-// NOVA ROTA PARA LOGIN
-// =============================================================
+// Rota para LOGIN (ATUALIZADA COM CRIPTOGRAFIA)
 app.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // 1. Encontrar o usuário pelo email
     const user = await prisma.user.findUnique({
       where: { email: email },
     });
 
-    // 2. Se o usuário não for encontrado, retornar um erro
     if (!user) {
-      return res.status(404).json({ error: 'Usuário não encontrado.' });
+      return res.status(404).json({ error: 'Usuário ou senha inválidos.' });
     }
 
-    // 3. Se o usuário for encontrado, comparar as senhas
-    // ATENÇÃO: Esta é uma comparação simples. O ideal é usar criptografia.
-    if (user.password !== password) {
-      return res.status(401).json({ error: 'Senha incorreta.' });
+    // COMPARA A SENHA ENVIADA COM A SENHA CRIPTOGRAFADA NO BANCO
+    const isPasswordValid = await bcrypt.compare(password, user.password); // <-- 3. USAMOS BCRYPT PARA COMPARAR
+
+    if (!isPasswordValid) {
+      return res.status(401).json({ error: 'Usuário ou senha inválidos.' });
     }
 
-    // Por segurança, removemos a senha do objeto antes de enviá-lo de volta
     const { password: _, ...userWithoutPassword } = user;
-
-    // 4. Se as senhas baterem, retornar uma mensagem de sucesso
     res.status(200).json({
       message: 'Login bem-sucedido!',
       user: userWithoutPassword,
