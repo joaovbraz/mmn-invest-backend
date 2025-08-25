@@ -15,7 +15,8 @@
     "@prisma/client": "^5.14.0",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.5",
-    "express": "^4.19.2"
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2"
   },
   "devDependencies": {
     "prisma": "^5.14.0"
