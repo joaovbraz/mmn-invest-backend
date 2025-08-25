@@ -124,7 +124,9 @@ app.post('/investimentos', protect, async (req, res) => {
     res.status(500).json({ error: 'Não foi possível processar o investimento.' });
   }
 });
-app.get('/meus-investimentos', async (req, res) => {
+
+// ROTA CORRIGIDA COM O "SEGURANÇA" (protect) DE VOLTA
+app.get('/meus-investimentos', protect, async (req, res) => {
   try {
     const userId = req.user.id;
     const investimentos = await prisma.investment.findMany({ where: { userId: userId }, include: { plan: true }, orderBy: { startDate: 'desc' } });
