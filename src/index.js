@@ -1,3 +1,5 @@
+// Arquivo: src/index.js (do Backend) - VERSÃO COMPLETA COM ALTERAÇÃO DE SENHA
+
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
 import cors from 'cors';
@@ -124,8 +126,6 @@ app.post('/investimentos', protect, async (req, res) => {
     res.status(500).json({ error: 'Não foi possível processar o investimento.' });
   }
 });
-
-// ROTA CORRIGIDA COM O "SEGURANÇA" (protect) DE VOLTA
 app.get('/meus-investimentos', protect, async (req, res) => {
   try {
     const userId = req.user.id;
@@ -192,6 +192,32 @@ app.get('/saques', protect, async (req, res) => {
   } catch (error) {
     console.error("Erro ao buscar histórico de saques:", error);
     res.status(500).json({ error: "Não foi possível buscar o histórico de saques." });
+  }
+});
+app.put('/perfil/alterar-senha', protect, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { currentPassword, newPassword, confirmPassword } = req.body;
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      return res.status(400).json({ error: 'Todos os campos são obrigatórios.' });
+    }
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({ error: 'A nova senha e a confirmação não coincidem.' });
+    }
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    const isPasswordValid = await bcrypt.compare(currentPassword, user.password);
+    if (!isPasswordValid) {
+      return res.status(401).json({ error: 'A senha atual está incorreta.' });
+    }
+    const hashedNewPassword = await bcrypt.hash(newPassword, saltRounds);
+    await prisma.user.update({
+      where: { id: userId },
+      data: { password: hashedNewPassword },
+    });
+    res.status(200).json({ message: 'Senha alterada com sucesso!' });
+  } catch (error) {
+    console.error("Erro ao alterar senha:", error);
+    res.status(500).json({ error: 'Não foi possível alterar a senha.' });
   }
 });
 app.get('/admin/saques', protect, admin, async (req, res) => {
