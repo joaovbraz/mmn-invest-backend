@@ -95,8 +95,7 @@ app.post('/investimentos', protect, async (req, res) => {
     const result = await prisma.$transaction(async (prisma) => {
       const novoInvestimento = await prisma.investment.create({ data: { userId: investingUser.id, planId: planId } });
       const plan = await prisma.plan.findUnique({ where: { id: planId } });
-      const commissionRate = 0.10;
-      const commissionAmount = plan.price * commissionRate;
+      let commissionAmount = plan.price * 0.10;
       let currentReferrerId = investingUser.referrerId;
       for (let level = 1; level <= 4; level++) {
         if (!currentReferrerId) {
@@ -105,11 +104,16 @@ app.post('/investimentos', protect, async (req, res) => {
         }
         const referrer = await prisma.user.findUnique({ where: { id: currentReferrerId }, include: { wallet: true }, });
         if (referrer && referrer.wallet) {
-          await prisma.wallet.update({ where: { id: referrer.wallet.id }, data: { referralBalance: { increment: commissionAmount } }, });
-          await prisma.transaction.create({ data: { walletId: referrer.wallet.id, amount: commissionAmount, type: 'REFERRAL_BONUS', description: `Bônus de indicação (Nível ${level}) pelo investimento de ${investingUser.name}`, } });
-          console.log(`Bônus (Nível ${level}) de R$ ${commissionAmount} pago para o usuário ${referrer.id}`);
+          const roundedCommission = Math.round(commissionAmount * 100) / 100;
+          await prisma.wallet.update({ where: { id: referrer.wallet.id }, data: { referralBalance: { increment: roundedCommission } }, });
+          await prisma.transaction.create({ data: { walletId: referrer.wallet.id, amount: roundedCommission, type: 'REFERRAL_BONUS', description: `Bônus de indicação (Nível ${level}) pelo investimento de ${investingUser.name}`, } });
+          console.log(`Bônus (Nível ${level}) de R$ ${roundedCommission} pago para o usuário ${referrer.id}`);
+          commissionAmount = roundedCommission * 0.10;
+          currentReferrerId = referrer.referrerId;
+        } else {
+          console.log(`Cadeia de indicação quebrada no nível ${level}.`);
+          break;
         }
-        currentReferrerId = referrer.referrerId;
       }
       return novoInvestimento;
     });
@@ -120,7 +124,7 @@ app.post('/investimentos', protect, async (req, res) => {
     res.status(500).json({ error: 'Não foi possível processar o investimento.' });
   }
 });
-app.get('/meus-investimentos', protect, async (req, res) => {
+app.get('/meus-investimentos', async (req, res) => {
   try {
     const userId = req.user.id;
     const investimentos = await prisma.investment.findMany({ where: { userId: userId }, include: { plan: true }, orderBy: { startDate: 'desc' } });
