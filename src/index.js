@@ -1,5 +1,4 @@
 // Arquivo: src/index.js (do Backend) - VERSÃO COMPLETA E CORRIGIDA
-
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
 import cors from 'cors';
@@ -124,12 +123,21 @@ app.post('/investimentos', protect, async (req, res) => {
   try {
     const investingUser = await prisma.user.findUnique({ where: { id: req.user.id }, include: { wallet: true }});
     
-    // LINHA ADICIONADA PARA CORREÇÃO
+    // Correção anterior mantida, é importante
     if (!investingUser) { return res.status(404).json({ error: 'Usuário investidor não encontrado.' }); }
 
-    const { planId } = req.body;
-    if (!planId) { return res.status(400).json({ error: 'O ID do plano é obrigatório.' }); }
+    // =============================================================
+    // LINHAS ALTERADAS/ADICIONADAS PARA A NOVA CORREÇÃO
+    // =============================================================
+    const { planId: rawPlanId } = req.body;
+    if (!rawPlanId) { return res.status(400).json({ error: 'O ID do plano é obrigatório.' }); }
     
+    const planId = parseInt(rawPlanId, 10);
+    if (isNaN(planId)) {
+        return res.status(400).json({ error: 'O ID do plano fornecido é inválido.' });
+    }
+    // =============================================================
+
     const plan = await prisma.plan.findUnique({ where: { id: planId } });
     if (!plan) { return res.status(404).json({ error: 'Plano não encontrado.' }); }
     
@@ -138,7 +146,6 @@ app.post('/investimentos', protect, async (req, res) => {
     const totalBalance = userWallet.balance + userWallet.referralBalance;
     if (totalBalance < plan.price) { return res.status(400).json({ error: 'Saldo insuficiente para comprar este plano.' }); }
 
-    // CALCULA A DATA FINAL USANDO A NOVA FUNÇÃO
     const startDate = new Date();
     const endDate = addBusinessDays(startDate, plan.durationDays);
 
@@ -154,7 +161,6 @@ app.post('/investimentos', protect, async (req, res) => {
       await prisma.wallet.update({ where: { id: userWallet.id }, data: { balance: { decrement: amountToDeductFromBalance }, referralBalance: { decrement: amountToDeductFromReferral } } });
       await prisma.transaction.create({ data: { walletId: userWallet.id, amount: -plan.price, type: 'PLAN_PURCHASE', description: `Compra do ${plan.name}` } });
 
-      // CRIA O NOVO INVESTIMENTO COM A DATA FINAL
       const novoInvestimento = await prisma.investment.create({ data: { userId: investingUser.id, planId: planId, startDate: startDate, endDate: endDate } });
       
       let commissionAmount = plan.price * 0.10;
