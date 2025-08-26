@@ -118,11 +118,15 @@ app.get('/planos', async (req, res) => {
 });
 
 // =============================================================
-// ROTA DE INVESTIMENTOS ATUALIZADA
+// ROTA DE INVESTIMENTOS ATUALIZADA E CORRIGIDA
 // =============================================================
 app.post('/investimentos', protect, async (req, res) => {
   try {
     const investingUser = await prisma.user.findUnique({ where: { id: req.user.id }, include: { wallet: true }});
+    
+    // LINHA ADICIONADA PARA CORREÇÃO
+    if (!investingUser) { return res.status(404).json({ error: 'Usuário investidor não encontrado.' }); }
+
     const { planId } = req.body;
     if (!planId) { return res.status(400).json({ error: 'O ID do plano é obrigatório.' }); }
     
