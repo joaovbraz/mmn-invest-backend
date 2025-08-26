@@ -1,4 +1,4 @@
-// Arquivo: src/index.js (do Backend) - VERSÃO FINAL E SEGURA
+// Arquivo: src/index.js (do Backend) - VERSÃO COM RASTREAMENTO DE ERRO
 
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
@@ -77,14 +77,20 @@ app.post('/criar-usuario', async (req, res) => {
     const { password: _, ...userWithoutPassword } = newUser;
     res.status(201).json(userWithoutPassword);
   } catch (error) {
-    if (error.code === 'P2002') { 
-      return res.status(409).json({ error: 'Este email ou código de convite já está em uso.' }); 
+    // ========================================================================
+    // CÓDIGO DE RASTREAMENTO DE ERRO
+    // ========================================================================
+    console.error("ERRO DETALHADO NO CADASTRO:", error);
+    if (error.code === 'P2002') {
+      return res.status(409).json({ error: 'Este email ou código de convite já está em uso.' });
     }
-    console.error("Erro no cadastro:", error);
-    res.status(400).json({ error: 'Não foi possível completar o cadastro.' });
+    // Envia o erro técnico detalhado para o frontend
+    res.status(400).json({ error: `Erro técnico rastreado: ${error.message}` });
+    // ========================================================================
   }
 });
 
+// ... (O restante do seu arquivo index.js continua exatamente o mesmo)
 app.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -183,7 +189,6 @@ app.post('/investimentos', protect, async (req, res) => {
   }
 });
 
-// ... (Restante do arquivo)
 app.get('/meus-investimentos', protect, async (req, res) => {
   try {
     const userId = req.user.id;
