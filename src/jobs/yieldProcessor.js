@@ -1,18 +1,16 @@
-// Arquivo: src/jobs/yieldProcessor.js - VERSÃO ATUALIZADA
+// Arquivo: src/jobs/yieldProcessor.js - VERSÃO FINAL E COMPLETA
 
 import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
-// Agora a função é "exportada", ou seja, pode ser chamada por outros arquivos
 export async function processDailyYields() {
-  console.log('🤖 Tarefa de rendimentos iniciada por gatilho de API...');
+  console.log('🤖 Tarefa de rendimentos iniciada...');
 
   const today = new Date();
   const dayOfWeek = today.getDay();
 
   if (dayOfWeek === 0 || dayOfWeek === 6) {
     console.log('É fim de semana. Nenhum rendimento a ser processado. 😴');
-    // Em vez de sair, retornamos uma mensagem
     return { message: 'Fim de semana, nenhum rendimento processado.' };
   }
 
@@ -31,6 +29,7 @@ export async function processDailyYields() {
 
   let successCount = 0;
   let errorCount = 0;
+  let completedCount = 0;
 
   for (const investment of activeInvestments) {
     if (!investment.user.wallet) {
@@ -43,11 +42,13 @@ export async function processDailyYields() {
 
     try {
       await prisma.$transaction(async (prisma) => {
+        // 1. PAGA O RENDIMENTO NA CARTEIRA
         await prisma.wallet.update({
           where: { id: investment.user.wallet.id },
           data: { balance: { increment: yieldAmount } },
         });
 
+        // 2. REGISTRA A TRANSAÇÃO NO EXTRATO
         await prisma.transaction.create({
           data: {
             walletId: investment.user.wallet.id,
@@ -56,6 +57,22 @@ export async function processDailyYields() {
             description: `Rendimento diário do ${investment.plan.name}`,
           },
         });
+
+        // 3. ATUALIZA O CONTADOR DE PAGAMENTOS
+        const updatedInvestment = await prisma.investment.update({
+          where: { id: investment.id },
+          data: { payoutsMade: { increment: 1 } },
+        });
+
+        // 4. VERIFICA SE O CONTRATO TERMINOU
+        if (updatedInvestment.payoutsMade >= investment.plan.durationDays) {
+          await prisma.investment.update({
+            where: { id: investment.id },
+            data: { status: 'COMPLETED' }, // Encerra o contrato
+          });
+          completedCount++;
+          console.log(`🎉 Investimento ID ${investment.id} concluído após 40 pagamentos.`);
+        }
       });
       successCount++;
     } catch (error) {
@@ -64,7 +81,7 @@ export async function processDailyYields() {
     }
   }
   
-  const summary = `Processamento concluído. ${successCount} pagamentos realizados, ${errorCount} falhas.`;
+  const summary = `Processamento concluído. ${successCount} pagamentos realizados, ${completedCount} contratos finalizados, ${errorCount} falhas.`;
   console.log(summary);
   return { message: summary };
 }
