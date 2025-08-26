@@ -1,4 +1,5 @@
-// Arquivo: src/index.js (do Backend) - VERSÃO PARA DEPURAÇÃO
+// Arquivo: src/index.js (do Backend) - 100% COMPLETO E CORRIGIDO
+
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
 import cors from 'cors';
@@ -17,7 +18,7 @@ function addBusinessDays(startDate, days) {
   let addedDays = 0;
   while (addedDays < days) {
     currentDate.setDate(currentDate.getDate() + 1);
-    const dayOfWeek = currentDate.getDay();
+    const dayOfWeek = currentDate.getDay(); // 0 = Domingo, 6 = Sábado
     if (dayOfWeek !== 0 && dayOfWeek !== 6) {
       addedDays++;
     }
@@ -170,14 +171,8 @@ app.post('/investimentos', protect, async (req, res) => {
     await updateUserRankByTotalInvestment(investingUser.id);
     res.status(201).json(result);
   } catch (error) {
-    // ========================================================================
-    // MUDANÇA TEMPORÁRIA PARA DEBUG - ENVIA O ERRO REAL PARA O FRONTEND
-    // ========================================================================
-    console.error("Erro detalhado ao processar investimento:", error);
-    res.status(500).json({ 
-        error: `Erro no servidor: ${error.message}` 
-    });
-    // ========================================================================
+    console.error("Erro ao processar investimento:", error);
+    res.status(500).json({ error: 'Não foi possível processar o investimento.' });
   }
 });
 

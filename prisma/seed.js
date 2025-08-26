@@ -1,4 +1,4 @@
-// Arquivo: prisma/seed.js - VERSÃO CORRIGIDA
+// Arquivo: prisma/seed.js - 100% COMPLETO E CORRIGIDO
 
 import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();

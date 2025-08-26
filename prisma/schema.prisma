@@ -1,39 +1,86 @@
-// Arquivo: prisma/seed.js - COM O NOVO PLANO DE R$ 50
+// Arquivo: prisma/schema.prisma - 100% COMPLETO E CORRIGIDO
 
-import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient();
-
-async function main() {
-  console.log('Limpando planos antigos...');
-  await prisma.plan.deleteMany({}); // Apaga todos os planos existentes
-  console.log('Planos antigos removidos.');
-
-  console.log('Iniciando o seeding com os novos planos...');
-  const plans = [
-    { name: 'Plano Cobre', price: 50.00, dailyReturn: 4.0, durationDays: 40 }, // <-- NOVO PLANO
-    { name: 'Plano Bronze', price: 100.00, dailyReturn: 4.0, durationDays: 40 },
-    { name: 'Plano Prata', price: 300.00, dailyReturn: 4.0, durationDays: 40 },
-    { name: 'Plano Ouro', price: 500.00, dailyReturn: 4.0, durationDays: 40 },
-    { name: 'Plano Platina', price: 1000.00, dailyReturn: 4.0, durationDays: 40 },
-    { name: 'Plano Diamante', price: 5000.00, dailyReturn: 4.0, durationDays: 40 },
-    { name: 'Plano Lendário', price: 10000.00, dailyReturn: 4.0, durationDays: 40 },
-  ];
-
-  for (const plan of plans) {
-    await prisma.plan.create({
-      data: plan,
-    });
-    console.log(`Plano "${plan.name}" criado.`);
-  }
-
-  console.log('Seeding concluído com sucesso!');
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
-main()
-  .catch((e) => {
-    console.error(e);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id             Int       @id @default(autoincrement())
+  email          String    @unique
+  name           String
+  password       String
+  role           String    @default("USER")
+  rank           String    @default("Bronze")
+  referralCode   String    @unique
+  referrerId     Int?
+  careerPoints   Int       @default(0)
+  createdAt      DateTime  @default(now())
+  
+  wallet         Wallet?
+  investments    Investment[]
+  withdrawals    Withdrawal[]
+  
+  referrer       User?     @relation("Referrals", fields: [referrerId], references: [id])
+  referees       User[]    @relation("Referrals")
+}
+
+model Wallet {
+  id              Int      @id @default(autoincrement())
+  userId          Int      @unique
+  balance         Float    @default(0)
+  referralBalance Float    @default(0)
+  
+  user            User     @relation(fields: [userId], references: [id])
+  transactions    Transaction[]
+}
+
+model Plan {
+  id            Int      @id @default(autoincrement())
+  name          String
+  price         Float
+  dailyReturn   Float
+  durationDays  Int
+  
+  investments   Investment[]
+}
+
+model Investment {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  planId    Int
+  startDate DateTime @default(now())
+  endDate   DateTime // <-- CAMPO CRÍTICO ADICIONADO AQUI
+  status    String   @default("ACTIVE")
+  
+  user      User     @relation(fields: [userId], references: [id])
+  plan      Plan     @relation(fields: [planId], references: [id])
+}
+
+model Transaction {
+  id          Int      @id @default(autoincrement())
+  walletId    Int
+  amount      Float
+  type        String // e.g., 'DEPOSIT', 'WITHDRAWAL', 'YIELD', 'REFERRAL_BONUS', 'PLAN_PURCHASE'
+  description String
+  createdAt   DateTime @default(now())
+
+  wallet      Wallet   @relation(fields: [walletId], references: [id])
+}
+
+model Withdrawal {
+  id          Int      @id @default(autoincrement())
+  userId      Int
+  amount      Float
+  walletType  String   // 'balance' or 'referral'
+  status      String   @default("PENDING") // 'PENDING', 'APPROVED', 'REJECTED'
+  reason      String?  // Reason for rejection
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user        User     @relation(fields: [userId], references: [id])
+}
