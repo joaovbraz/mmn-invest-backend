@@ -1,4 +1,4 @@
-// Arquivo: src/index.js (do Backend) - VERSÃO COM RASTREAMENTO DE ERRO
+// Arquivo: src/index.js (do Backend) - VERSÃO COM REDE MULTINÍVEL
 
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
@@ -45,6 +45,29 @@ async function updateUserRankByTotalInvestment(userId) {
   }
 }
 
+// NOVA FUNÇÃO RECURSIVA PARA BUSCAR A REDE EM NÍVEIS
+async function getNetworkLevels(userIds, currentLevel = 1, maxLevel = 10) {
+    if (!userIds || userIds.length === 0 || currentLevel > maxLevel) {
+        return [];
+    }
+
+    const referrals = await prisma.user.findMany({
+        where: { referrerId: { in: userIds } },
+        select: { id: true, name: true, email: true, createdAt: true },
+    });
+
+    if (referrals.length === 0) {
+        return [];
+    }
+
+    const nextLevelUserIds = referrals.map(r => r.id);
+    const subReferrals = await getNetworkLevels(nextLevelUserIds, currentLevel + 1, maxLevel);
+    
+    const currentLevelReferrals = referrals.map(r => ({ ...r, level: currentLevel }));
+
+    return [...currentLevelReferrals, ...subReferrals];
+}
+
 app.use(cors());
 app.use(express.json());
 app.get('/', (req, res) => { res.json({ message: 'API do TDP INVEST funcionando!' }); });
@@ -77,20 +100,14 @@ app.post('/criar-usuario', async (req, res) => {
     const { password: _, ...userWithoutPassword } = newUser;
     res.status(201).json(userWithoutPassword);
   } catch (error) {
-    // ========================================================================
-    // CÓDIGO DE RASTREAMENTO DE ERRO
-    // ========================================================================
     console.error("ERRO DETALHADO NO CADASTRO:", error);
     if (error.code === 'P2002') {
       return res.status(409).json({ error: 'Este email ou código de convite já está em uso.' });
     }
-    // Envia o erro técnico detalhado para o frontend
     res.status(400).json({ error: `Erro técnico rastreado: ${error.message}` });
-    // ========================================================================
   }
 });
 
-// ... (O restante do seu arquivo index.js continua exatamente o mesmo)
 app.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -214,8 +231,9 @@ app.get('/minha-rede', protect, async (req, res) => {
 app.get('/minha-rede-detalhes', protect, async (req, res) => {
   try {
     const userId = req.user.id;
-    const referrals = await prisma.user.findMany({ where: { referrerId: userId }, orderBy: { createdAt: 'desc' }, select: { id: true, name: true, email: true, createdAt: true, } });
-    res.status(200).json(referrals);
+    // Agora chamamos a nova função para buscar a rede completa
+    const network = await getNetworkLevels([userId]);
+    res.status(200).json(network);
   } catch (error) {
     console.error("Erro ao buscar detalhes da rede:", error);
     res.status(500).json({ error: "Não foi possível buscar os detalhes da rede." });
