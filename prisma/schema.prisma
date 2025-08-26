@@ -1,79 +1,39 @@
-// Arquivo: prisma/schema.prisma - VERSÃO CORRETA E COMPLETA
+// Arquivo: prisma/seed.js - COM O NOVO PLANO DE R$ 50
 
-generator client {
-  provider = "prisma-client-js"
+import { PrismaClient } from '@prisma/client';
+const prisma = new PrismaClient();
+
+async function main() {
+  console.log('Limpando planos antigos...');
+  await prisma.plan.deleteMany({}); // Apaga todos os planos existentes
+  console.log('Planos antigos removidos.');
+
+  console.log('Iniciando o seeding com os novos planos...');
+  const plans = [
+    { name: 'Plano Cobre', price: 50.00, dailyReturn: 4.0, durationDays: 40 }, // <-- NOVO PLANO
+    { name: 'Plano Bronze', price: 100.00, dailyReturn: 4.0, durationDays: 40 },
+    { name: 'Plano Prata', price: 300.00, dailyReturn: 4.0, durationDays: 40 },
+    { name: 'Plano Ouro', price: 500.00, dailyReturn: 4.0, durationDays: 40 },
+    { name: 'Plano Platina', price: 1000.00, dailyReturn: 4.0, durationDays: 40 },
+    { name: 'Plano Diamante', price: 5000.00, dailyReturn: 4.0, durationDays: 40 },
+    { name: 'Plano Lendário', price: 10000.00, dailyReturn: 4.0, durationDays: 40 },
+  ];
+
+  for (const plan of plans) {
+    await prisma.plan.create({
+      data: plan,
+    });
+    console.log(`Plano "${plan.name}" criado.`);
+  }
+
+  console.log('Seeding concluído com sucesso!');
 }
 
-datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-}
-
-model User {
-  id           Int          @id @default(autoincrement())
-  email        String       @unique
-  name         String?
-  password     String
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
-  
-  referralCode String?      @unique
-  referrerId   Int?
-  referrer     User?        @relation("Referrals", fields: [referrerId], references: [id])
-  referrals    User[]       @relation("Referrals")
-  
-  rank         String       @default("Bronze")
-  role         String       @default("USER") // Cargos: USER, ADMIN
-  careerPoints Int          @default(0)      // Pontos por indicação
-  
-  investments  Investment[]
-  wallet       Wallet?
-  withdrawals  Withdrawal[]
-}
-
-model Plan {
-  id            Int      @id @default(autoincrement())
-  name          String   @unique
-  price         Float
-  dailyReturn   Float
-  investments   Investment[]
-}
-
-model Investment {
-  id        Int      @id @default(autoincrement())
-  startDate DateTime @default(now())
-  status    String   @default("ACTIVE")
-  userId    Int
-  user      User     @relation(fields: [userId], references: [id])
-  planId    Int
-  plan      Plan     @relation(fields: [planId], references: [id])
-}
-
-model Wallet {
-  id              Int      @id @default(autoincrement())
-  balance         Float    @default(0.0)
-  referralBalance Float    @default(0.0)
-  userId          Int      @unique
-  user            User     @relation(fields: [userId], references: [id])
-  transactions    Transaction[]
-}
-
-model Transaction {
-  id          Int      @id @default(autoincrement())
-  amount      Float
-  type        String
-  description String
-  createdAt   DateTime @default(now())
-  walletId    Int
-  wallet      Wallet   @relation(fields: [walletId], references: [id])
-}
-
-model Withdrawal {
-  id        Int      @id @default(autoincrement())
-  amount    Float
-  status    String   @default("PENDING")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  userId    Int
-  user      User     @relation(fields: [userId], references: [id])
-}
+main()
+  .catch((e) => {
+    console.error(e);
+    process.exit(1);
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
+  });
