@@ -1,4 +1,4 @@
-// Arquivo: src/index.js (do Backend) - VERSÃO COMPLETA E CORRIGIDA
+// Arquivo: src/index.js (do Backend) - VERSÃO PARA DEPURAÇÃO
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
 import cors from 'cors';
@@ -12,15 +12,12 @@ const prisma = new PrismaClient();
 const saltRounds = 10;
 const rankThresholds = { Lendário: 10000, Diamante: 5000, Platina: 1000, Ouro: 500, Prata: 300, Bronze: 0 };
 
-// =============================================================
-// FUNÇÃO ADICIONADA PARA CALCULAR DIAS ÚTEIS
-// =============================================================
 function addBusinessDays(startDate, days) {
   let currentDate = new Date(startDate);
   let addedDays = 0;
   while (addedDays < days) {
     currentDate.setDate(currentDate.getDate() + 1);
-    const dayOfWeek = currentDate.getDay(); // 0 = Domingo, 6 = Sábado
+    const dayOfWeek = currentDate.getDay();
     if (dayOfWeek !== 0 && dayOfWeek !== 6) {
       addedDays++;
     }
@@ -116,19 +113,12 @@ app.get('/planos', async (req, res) => {
   } catch (error) { res.status(500).json({ error: 'Não foi possível buscar os planos.' }); }
 });
 
-// =============================================================
-// ROTA DE INVESTIMENTOS ATUALIZADA E CORRIGIDA
-// =============================================================
 app.post('/investimentos', protect, async (req, res) => {
   try {
     const investingUser = await prisma.user.findUnique({ where: { id: req.user.id }, include: { wallet: true }});
     
-    // Correção anterior mantida, é importante
     if (!investingUser) { return res.status(404).json({ error: 'Usuário investidor não encontrado.' }); }
 
-    // =============================================================
-    // LINHAS ALTERADAS/ADICIONADAS PARA A NOVA CORREÇÃO
-    // =============================================================
     const { planId: rawPlanId } = req.body;
     if (!rawPlanId) { return res.status(400).json({ error: 'O ID do plano é obrigatório.' }); }
     
@@ -136,7 +126,6 @@ app.post('/investimentos', protect, async (req, res) => {
     if (isNaN(planId)) {
         return res.status(400).json({ error: 'O ID do plano fornecido é inválido.' });
     }
-    // =============================================================
 
     const plan = await prisma.plan.findUnique({ where: { id: planId } });
     if (!plan) { return res.status(404).json({ error: 'Plano não encontrado.' }); }
@@ -181,8 +170,14 @@ app.post('/investimentos', protect, async (req, res) => {
     await updateUserRankByTotalInvestment(investingUser.id);
     res.status(201).json(result);
   } catch (error) {
-    console.error("Erro ao processar investimento:", error);
-    res.status(500).json({ error: 'Não foi possível processar o investimento.' });
+    // ========================================================================
+    // MUDANÇA TEMPORÁRIA PARA DEBUG - ENVIA O ERRO REAL PARA O FRONTEND
+    // ========================================================================
+    console.error("Erro detalhado ao processar investimento:", error);
+    res.status(500).json({ 
+        error: `Erro no servidor: ${error.message}` 
+    });
+    // ========================================================================
   }
 });
 
