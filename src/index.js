@@ -51,6 +51,12 @@ app.get('/', (req, res) => { res.json({ message: 'API do TDP INVEST funcionando!
 
 app.post('/criar-usuario', async (req, res) => {
   const { email, name, password, referrerCode } = req.body;
+  
+  // VALIDAÇÃO ADICIONADA PARA GARANTIR QUE OS DADOS ESSENCIAIS EXISTEM
+  if (!email || !name || !password) {
+    return res.status(400).json({ error: 'Todos os campos (nome, email, senha) são obrigatórios.' });
+  }
+
   try {
     const hashedPassword = await bcrypt.hash(password, saltRounds);
     let referrerId = null;
@@ -176,6 +182,7 @@ app.post('/investimentos', protect, async (req, res) => {
   }
 });
 
+// ... (Restante do seu arquivo index.js continua o mesmo)
 app.get('/meus-investimentos', protect, async (req, res) => {
   try {
     const userId = req.user.id;
