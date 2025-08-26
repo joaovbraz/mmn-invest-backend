@@ -10,43 +10,43 @@ generator client {
 }
 
 model User {
-  id             Int          @id @default(autoincrement())
-  email          String       @unique
-  name           String
-  password       String
-  role           String       @default("USER") // <-- LINHA CORRIGIDA
-  rank           String       @default("Bronze")
-  referralCode   String       @unique
-  referrerId     Int?
-  careerPoints   Int          @default(0)
-  createdAt      DateTime     @default(now())
-  wallet         Wallet?
-  investments    Investment[]
-  withdrawals    Withdrawal[]
-  referrer       User?        @relation("Referrals", fields: [referrerId], references: [id])
-  referees       User[]       @relation("Referrals")
+  id           Int          @id @default(autoincrement())
+  email        String       @unique
+  name         String
+  password     String
+  role         String       @default("USER") // <-- CORRIGIDO
+  rank         String       @default("Bronze")
+  referralCode String       @unique
+  referrerId   Int?
+  careerPoints Int          @default(0)
+  createdAt    DateTime     @default(now())
+  wallet       Wallet?
+  investments  Investment[]
+  withdrawals  Withdrawal[]
+  referrer     User?        @relation("Referrals", fields: [referrerId], references: [id])
+  referees     User[]       @relation("Referrals")
 }
 
 model Wallet {
-  id              Int         @id @default(autoincrement())
-  userId          Int         @unique
-  balance         Float       @default(0)
-  referralBalance Float       @default(0)
-  user            User        @relation(fields: [userId], references: [id])
+  id              Int           @id @default(autoincrement())
+  userId          Int           @unique
+  balance         Float         @default(0)
+  referralBalance Float         @default(0)
+  user            User          @relation(fields: [userId], references: [id]) // <-- CORRIGIDO
   transactions    Transaction[]
 }
 
 model Plan {
-  id            Int          @id @default(autoincrement())
-  name          String
-  price         Float
-  dailyReturn   Float
-  durationDays  Int
-  investments   Investment[]
+  id           Int          @id @default(autoincrement())
+  name         String
+  price        Float
+  dailyReturn  Float
+  durationDays Int
+  investments  Investment[]
 }
 
 model Investment {
-  id        Int      @id @default(autoincrement())
+  id        Int      @id @default(autoincrement()) // <-- CORRIGIDO
   userId    Int
   planId    Int
   startDate DateTime @default(now())
@@ -58,7 +58,7 @@ model Investment {
 
 model Transaction {
   id          Int      @id @default(autoincrement())
-  walletId    Int
+  walletId    Int // <-- CORRIGIDO
   amount      Float
   type        String // e.g., 'DEPOSIT', 'WITHDRAWAL', 'YIELD', 'REFERRAL_BONUS', 'PLAN_PURCHASE'
   description String
@@ -67,13 +67,13 @@ model Transaction {
 }
 
 model Withdrawal {
-  id          Int      @id @default(autoincrement())
-  userId      Int
-  amount      Float
-  walletType  String   // 'balance' or 'referral'
-  status      String   @default("PENDING") // 'PENDING', 'APPROVED', 'REJECTED'
-  reason      String?  // Reason for rejection
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  user        User     @relation(fields: [userId], references: [id])
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  amount     Float
+  walletType String   // 'balance' or 'referral'
+  status     String   @default("PENDING") // 'PENDING', 'APPROVED', 'REJECTED' // <-- CORRIGIDO
+  reason     String?  // Reason for rejection
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  user       User     @relation(fields: [userId], references: [id])
 }
