@@ -1,4 +1,4 @@
-// Arquivo: src/index.js (do Backend) - VERSÃO CONFIRMADA E CORRETA
+// Arquivo: src/index.js (do Backend) - VERSÃO PARA DEPURAÇÃO DO CADASTRO
 
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
@@ -13,12 +13,13 @@ const prisma = new PrismaClient();
 const saltRounds = 10;
 const rankThresholds = { Lendário: 10000, Diamante: 5000, Platina: 1000, Ouro: 500, Prata: 300, Bronze: 0 };
 
+// ... (todas as outras funções como addBusinessDays, etc. continuam iguais)
 function addBusinessDays(startDate, days) {
   let currentDate = new Date(startDate);
   let addedDays = 0;
   while (addedDays < days) {
     currentDate.setDate(currentDate.getDate() + 1);
-    const dayOfWeek = currentDate.getDay(); // 0 = Domingo, 6 = Sábado
+    const dayOfWeek = currentDate.getDay();
     if (dayOfWeek !== 0 && dayOfWeek !== 6) {
       addedDays++;
     }
@@ -45,6 +46,7 @@ async function updateUserRankByTotalInvestment(userId) {
   }
 }
 
+
 app.use(cors());
 app.use(express.json());
 app.get('/', (req, res) => { res.json({ message: 'API do TDP INVEST funcionando!' }); });
@@ -52,7 +54,6 @@ app.get('/', (req, res) => { res.json({ message: 'API do TDP INVEST funcionando!
 app.post('/criar-usuario', async (req, res) => {
   const { email, name, password, referrerCode } = req.body;
   
-  // VALIDAÇÃO ESSENCIAL QUE JÁ ESTÁ NO SEU CÓDIGO
   if (!email || !name || !password) {
     return res.status(400).json({ error: 'Todos os campos (nome, email, senha) são obrigatórios.' });
   }
@@ -78,13 +79,20 @@ app.post('/criar-usuario', async (req, res) => {
     const { password: _, ...userWithoutPassword } = newUser;
     res.status(201).json(userWithoutPassword);
   } catch (error) {
-    if (error.code === 'P2002') { return res.status(409).json({ error: 'Este email ou código de convite já está em uso.' }); }
-    console.error("Erro no cadastro:", error);
-    res.status(400).json({ error: 'Não foi possível completar o cadastro.' });
+    // ========================================================================
+    // MUDANÇA TEMPORÁRIA PARA DEBUG - ENVIA O ERRO REAL PARA O FRONTEND
+    // ========================================================================
+    console.error("ERRO DETALHADO NO CADASTRO:", error); 
+    if (error.code === 'P2002') { 
+      return res.status(409).json({ error: 'Este email ou código de convite já está em uso.' }); 
+    }
+    // Envia o erro técnico detalhado para o frontend
+    res.status(400).json({ error: `Erro técnico no cadastro: ${error.message}` });
+    // ========================================================================
   }
 });
 
-// ... (O restante do seu arquivo continua exatamente o mesmo, pois já estava correto)
+// ... (O restante do seu arquivo index.js continua exatamente o mesmo)
 app.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
