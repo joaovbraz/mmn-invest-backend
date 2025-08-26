@@ -1,4 +1,4 @@
-// Arquivo: src/index.js (do Backend) - VERSÃO COMPLETA E FINAL
+// Arquivo: src/index.js (do Backend) - VERSÃO COMPLETA E CORRIGIDA
 
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
@@ -11,15 +11,17 @@ import { processDailyYields } from './jobs/yieldProcessor.js';
 const app = express();
 const prisma = new PrismaClient();
 const saltRounds = 10;
-
 const rankThresholds = { Lendário: 10000, Diamante: 5000, Platina: 1000, Ouro: 500, Prata: 300, Bronze: 0 };
 
+// =============================================================
+// FUNÇÃO ADICIONADA PARA CALCULAR DIAS ÚTEIS
+// =============================================================
 function addBusinessDays(startDate, days) {
   let currentDate = new Date(startDate);
   let addedDays = 0;
   while (addedDays < days) {
     currentDate.setDate(currentDate.getDate() + 1);
-    const dayOfWeek = currentDate.getDay();
+    const dayOfWeek = currentDate.getDay(); // 0 = Domingo, 6 = Sábado
     if (dayOfWeek !== 0 && dayOfWeek !== 6) {
       addedDays++;
     }
@@ -115,11 +117,15 @@ app.get('/planos', async (req, res) => {
   } catch (error) { res.status(500).json({ error: 'Não foi possível buscar os planos.' }); }
 });
 
+// =============================================================
+// ROTA DE INVESTIMENTOS ATUALIZADA
+// =============================================================
 app.post('/investimentos', protect, async (req, res) => {
   try {
     const investingUser = await prisma.user.findUnique({ where: { id: req.user.id }, include: { wallet: true }});
     const { planId } = req.body;
     if (!planId) { return res.status(400).json({ error: 'O ID do plano é obrigatório.' }); }
+    
     const plan = await prisma.plan.findUnique({ where: { id: planId } });
     if (!plan) { return res.status(404).json({ error: 'Plano não encontrado.' }); }
     
@@ -128,6 +134,7 @@ app.post('/investimentos', protect, async (req, res) => {
     const totalBalance = userWallet.balance + userWallet.referralBalance;
     if (totalBalance < plan.price) { return res.status(400).json({ error: 'Saldo insuficiente para comprar este plano.' }); }
 
+    // CALCULA A DATA FINAL USANDO A NOVA FUNÇÃO
     const startDate = new Date();
     const endDate = addBusinessDays(startDate, plan.durationDays);
 
@@ -143,6 +150,7 @@ app.post('/investimentos', protect, async (req, res) => {
       await prisma.wallet.update({ where: { id: userWallet.id }, data: { balance: { decrement: amountToDeductFromBalance }, referralBalance: { decrement: amountToDeductFromReferral } } });
       await prisma.transaction.create({ data: { walletId: userWallet.id, amount: -plan.price, type: 'PLAN_PURCHASE', description: `Compra do ${plan.name}` } });
 
+      // CRIA O NOVO INVESTIMENTO COM A DATA FINAL
       const novoInvestimento = await prisma.investment.create({ data: { userId: investingUser.id, planId: planId, startDate: startDate, endDate: endDate } });
       
       let commissionAmount = plan.price * 0.10;
@@ -306,7 +314,7 @@ app.post('/admin/saques/:id/aprovar', protect, admin, async (req, res) => {
 app.post('/admin/saques/:id/rejeitar', protect, admin, async (req, res) => {
   try {
     const withdrawalId = parseInt(req.params.id);
-    const { reason } = req.body; // Adiciona um motivo para a rejeição
+    const { reason } = req.body;
     const withdrawal = await prisma.withdrawal.findUnique({ where: { id: withdrawalId } });
     if (!withdrawal) { return res.status(404).json({ error: 'Pedido de saque não encontrado.' }); }
     if (withdrawal.status !== 'PENDING') { return res.status(400).json({ error: 'Este saque já foi processado.' }); }
