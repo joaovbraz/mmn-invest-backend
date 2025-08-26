@@ -1,4 +1,4 @@
-// Arquivo: src/index.js (do Backend) - 100% COMPLETO E CORRIGIDO
+// Arquivo: src/index.js (do Backend) - VERSÃO CONFIRMADA E CORRETA
 
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
@@ -52,7 +52,7 @@ app.get('/', (req, res) => { res.json({ message: 'API do TDP INVEST funcionando!
 app.post('/criar-usuario', async (req, res) => {
   const { email, name, password, referrerCode } = req.body;
   
-  // VALIDAÇÃO ADICIONADA PARA GARANTIR QUE OS DADOS ESSENCIAIS EXISTEM
+  // VALIDAÇÃO ESSENCIAL QUE JÁ ESTÁ NO SEU CÓDIGO
   if (!email || !name || !password) {
     return res.status(400).json({ error: 'Todos os campos (nome, email, senha) são obrigatórios.' });
   }
@@ -84,6 +84,7 @@ app.post('/criar-usuario', async (req, res) => {
   }
 });
 
+// ... (O restante do seu arquivo continua exatamente o mesmo, pois já estava correto)
 app.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -182,7 +183,6 @@ app.post('/investimentos', protect, async (req, res) => {
   }
 });
 
-// ... (Restante do seu arquivo index.js continua o mesmo)
 app.get('/meus-investimentos', protect, async (req, res) => {
   try {
     const userId = req.user.id;
