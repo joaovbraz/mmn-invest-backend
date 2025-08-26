@@ -1,4 +1,4 @@
-// Arquivo: prisma/seed.js
+// Arquivo: prisma/seed.js - VERSÃO CORRIGIDA
 
 import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
@@ -6,13 +6,23 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('Iniciando o processo de seeding...');
 
+  // 1. APAGAMOS PRIMEIRO OS INVESTIMENTOS (os "contratos")
+  await prisma.investment.deleteMany({});
+  console.log('Investimentos de teste antigos removidos.');
+
+  // 2. DEPOIS APAGAMOS OS PLANOS (o "catálogo")
+  await prisma.plan.deleteMany({});
+  console.log('Planos antigos removidos.');
+
+  console.log('Iniciando o seeding com os 7 planos...');
   const plans = [
-    { name: 'Plano Bronze', price: 100.00, dailyReturn: 1.0 },
-    { name: 'Plano Prata', price: 300.00, dailyReturn: 1.1 },
-    { name: 'Plano Ouro', price: 500.00, dailyReturn: 1.4 },
-    { name: 'Plano Platina', price: 1000.00, dailyReturn: 1.7 },
-    { name: 'Plano Diamante', price: 5000.00, dailyReturn: 2.0 },
-    { name: 'Plano Lendário', price: 10000.00, dailyReturn: 2.3 },
+    { name: 'Plano Cobre', price: 50.00, dailyReturn: 4.0, durationDays: 40 },
+    { name: 'Plano Bronze', price: 100.00, dailyReturn: 4.0, durationDays: 40 },
+    { name: 'Plano Prata', price: 300.00, dailyReturn: 4.0, durationDays: 40 },
+    { name: 'Plano Ouro', price: 500.00, dailyReturn: 4.0, durationDays: 40 },
+    { name: 'Plano Platina', price: 1000.00, dailyReturn: 4.0, durationDays: 40 },
+    { name: 'Plano Diamante', price: 5000.00, dailyReturn: 4.0, durationDays: 40 },
+    { name: 'Plano Lendário', price: 10000.00, dailyReturn: 4.0, durationDays: 40 },
   ];
 
   for (const plan of plans) {
