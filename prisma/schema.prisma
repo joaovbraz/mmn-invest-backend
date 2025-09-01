@@ -13,18 +13,19 @@ model User {
   id             Int          @id @default(autoincrement())
   email          String       @unique
   name           String
+  phone          String?      // <-- CAMPO ADICIONADO CORRETAMENTE
   password       String
-  role           String       @default("USER")
+  role           String       @default("USER") [cite: 2]
   rank           String       @default("Bronze")
   referralCode   String       @unique
   referrerId     Int?
-  careerPoints   Int          @default(0)
+  careerPoints   Int          @default(0) [cite: 3]
   createdAt      DateTime     @default(now())
   wallet         Wallet?
-  investments    Investment[]
+  investments    Investment[] [cite: 4]
   withdrawals    Withdrawal[]
   referrer       User?        @relation("Referrals", fields: [referrerId], references: [id])
-  referees       User[]       @relation("Referrals")
+  referees       User[]       @relation("Referrals") [cite: 5]
 }
 
 model Wallet {
@@ -32,7 +33,7 @@ model Wallet {
   userId          Int         @unique
   balance         Float       @default(0)
   referralBalance Float       @default(0)
-  user            User        @relation(fields: [userId], references: [id])
+  user            User        @relation(fields: [userId], references: [id]) [cite: 6]
   transactions    Transaction[]
 }
 
@@ -46,7 +47,7 @@ model Plan {
 }
 
 model Investment {
-  id        Int      @id @default(autoincrement())
+  id        Int      @id @default(autoincrement()) [cite: 7]
   userId    Int
   planId    Int
   startDate DateTime @default(now())
@@ -58,7 +59,7 @@ model Investment {
 
 model Transaction {
   id          Int      @id @default(autoincrement())
-  walletId    Int
+  walletId    Int [cite: 8]
   amount      Float
   type        String // e.g., 'DEPOSIT', 'WITHDRAWAL', 'YIELD', 'REFERRAL_BONUS', 'PLAN_PURCHASE'
   description String
@@ -71,8 +72,8 @@ model Withdrawal {
   userId      Int
   amount      Float
   walletType  String   // 'balance' or 'referral'
-  status      String   @default("PENDING") // 'PENDING', 'APPROVED', 'REJECTED'
-  reason      String?  // Reason for rejection
+  status      String   @default("PENDING") // 'PENDING', 'APPROVED', 'REJECTED' [cite: 9]
+  reason      String?  // Reason for rejection [cite: 10]
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   user        User     @relation(fields: [userId], references: [id])

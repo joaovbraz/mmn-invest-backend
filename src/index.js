@@ -1,4 +1,4 @@
-// Arquivo: src/index.js (do Backend) - VERSÃO CORRIGIDA COM A ROTA /admin/usuarios
+// Arquivo: src/index.js (do Backend) - VERSÃO COMPLETA E ATUALIZADA
 
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
@@ -97,14 +97,49 @@ app.post('/login', async (req, res) => {
 app.get('/meus-dados', protect, async (req, res) => {
     try {
         const userId = req.user.id;
-        const userWithWallet = await prisma.user.findUnique({ where: { id: userId }, include: { wallet: true } });
-        if (!userWithWallet) { return res.status(404).json({ error: 'Usuário não encontrado.' }); }
+        const userWithDetails = await prisma.user.findUnique({ 
+          where: { id: userId }, 
+          include: { 
+            wallet: true,
+            _count: {
+              select: { referees: true }
+            } 
+          } 
+        });
+        if (!userWithDetails) { return res.status(404).json({ error: 'Usuário não encontrado.' }); }
+
         const userInvestments = await prisma.investment.findMany({ where: { userId: userId, status: 'ACTIVE' }, include: { plan: true }, });
         const totalInvested = userInvestments.reduce((sum, investment) => sum + investment.plan.price, 0);
-        delete userWithWallet.password;
-        const responseData = { ...userWithWallet, totalInvested: totalInvested };
+
+        delete userWithDetails.password;
+
+        const responseData = { 
+          ...userWithDetails, 
+          totalInvested: totalInvested,
+          referralCount: userWithDetails._count.referees 
+        };
         res.status(200).json(responseData);
     } catch (error) { res.status(500).json({ error: "Não foi possível buscar os dados do usuário."}) }
+});
+
+// ROTA ADICIONADA PARA ATUALIZAR O PERFIL
+app.put('/meus-dados', protect, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { name, phone } = req.body;
+    if (!name) {
+      return res.status(400).json({ error: 'O nome é obrigatório.' });
+    }
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: { name: name, phone: phone },
+    });
+    delete updatedUser.password;
+    res.status(200).json(updatedUser);
+  } catch (error) {
+    console.error("Erro ao atualizar perfil:", error);
+    res.status(500).json({ error: "Não foi possível atualizar os dados do perfil." });
+  }
 });
 
 app.get('/planos', async (req, res) => {
@@ -234,9 +269,6 @@ app.get('/admin/saques', protect, admin, async (req, res) => {
   } catch (error) { res.status(500).json({ error: 'Erro ao buscar saques pendentes.' }); }
 });
 
-// ==============================================================================
-// ROTA /admin/usuarios QUE ESTAVA FALTANDO - ADICIONADA AQUI
-// ==============================================================================
 app.get('/admin/usuarios', protect, admin, async (req, res) => {
   try {
     const users = await prisma.user.findMany({
@@ -252,7 +284,6 @@ app.get('/admin/usuarios', protect, admin, async (req, res) => {
     res.status(500).json({ error: 'Não foi possível buscar a lista de usuários.' });
   }
 });
-// ==============================================================================
 
 app.post('/admin/saques/:id/aprovar', protect, admin, async (req, res) => {
   try {
