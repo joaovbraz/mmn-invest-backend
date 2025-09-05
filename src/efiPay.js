@@ -1,12 +1,12 @@
 // src/efiPay.js
 // Integração Efí PIX via HTTP/2 + mTLS (P12)
-// Exports principais:
-// - getAccessToken (interno), __debugOAuth()
+// Exports:
 // - createImmediateCharge({ txid, amount, cpf, name })
 // - generateQrCode({ locId })
 // - setWebhookForKey({ key, url })
 // - getWebhookForKey({ key })
 // - getChargeByTxid({ txid })
+// - __debugOAuth()  (opcional p/ teste)
 
 import fs from 'fs';
 import path from 'path';
@@ -15,8 +15,8 @@ import http2 from 'http2';
 const {
   EFI_CLIENT_ID,
   EFI_CLIENT_SECRET,
-  EFI_CERTIFICATE_PATH,     // opção 1: caminho do .p12
-  EFI_CERTIFICATE_BASE64,   // opção 2: conteúdo base64 do .p12
+  EFI_CERTIFICATE_PATH,     // caminho do .p12 no disco (ex.: ./src/certs/producao.p12)
+  EFI_CERTIFICATE_BASE64,   // OU o conteúdo base64 do .p12
   EFI_CERTIFICATE_PASSWORD, // senha do .p12 (se houver)
   EFI_SANDBOX,
   CHAVE_PIX,
@@ -39,7 +39,7 @@ const BASE_URL =
 
 const { hostname } = new URL(BASE_URL);
 
-// --- carrega o .p12
+// -------- Carrega o .p12
 function loadP12Buffer() {
   if (EFI_CERTIFICATE_BASE64 && EFI_CERTIFICATE_BASE64.trim()) {
     return Buffer.from(EFI_CERTIFICATE_BASE64.trim(), 'base64');
@@ -52,7 +52,7 @@ function loadP12Buffer() {
 }
 const pfx = loadP12Buffer();
 
-// --- helper http2
+// -------- Helper HTTP/2
 function h2Request({ method, path: reqPath, headers = {}, body = null, timeoutMs = 20000, label = '' }) {
   return new Promise((resolve, reject) => {
     const client = http2.connect(BASE_URL, {
@@ -253,7 +253,6 @@ export async function getWebhookForKey({ key }) {
     });
     return res.data; // { webhookUrl: ... }
   } catch (err) {
-    // alguns ambientes podem não ter GET; tratamos como não configurado
     if (err?.status === 404) return null;
     console.error('--- ERRO AO LER WEBHOOK NA EFÍ ---', { status: err?.status, data: err?.data });
     throw new Error('Falha ao consultar webhook na Efí.');

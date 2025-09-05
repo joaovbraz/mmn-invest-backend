@@ -1,96 +1,97 @@
-// Arquivo: prisma/schema.prisma - 100% COMPLETO E CORRIGIDO
+// prisma/schema.prisma
+generator client {
+  provider = "prisma-client-js"
+}
 
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
-generator client {
-  provider = "prisma-client-js"
+enum TransactionType {
+  DEPOSIT
+  WITHDRAW
+  YIELD
+  PURCHASE
+}
+
+enum PixDepositStatus {
+  PENDING
+  COMPLETED
 }
 
 model User {
-  id             Int          @id @default(autoincrement())
-  email          String       @unique
-  name           String
-  phone          String?      // <-- CAMPO ADICIONADO CORRETAMENTE
-  password       String
-  role           String       @default("USER")
-  rank           String       @default("Bronze")
-  referralCode   String       @unique
-  referrerId     Int?
-  careerPoints   Int          @default(0)
-  createdAt      DateTime     @default(now())
-  wallet         Wallet?
-  investments    Investment[]
-  withdrawals    Withdrawal[]
-  referrer       User?        @relation("Referrals", fields: [referrerId], references: [id])
-  referees       User[]       @relation("Referrals")
-  pixDeposits    PixDeposit[] // <-- LINHA ADICIONADA
+  id            Int           @id @default(autoincrement())
+  email         String        @unique
+  name          String
+  password      String
+  role          String        @default("USER")
+  phone         String?
+  referralCode  String        @unique
+  referrerId    Int?
+  referees      User[]        @relation("Referrals")
+  referrer      User?         @relation("Referrals", fields: [referrerId], references: [id])
+  careerPoints  Int           @default(0)
+  rank          String        @default("Bronze")
+  createdAt     DateTime      @default(now())
+
+  wallet        Wallet?
+  investments   Investment[]
+  pixDeposits   PixDeposit[]
 }
 
 model Wallet {
-  id              Int           @id @default(autoincrement())
-  userId          Int           @unique
-  balance         Float         @default(0)
-  referralBalance Float         @default(0)
-  user            User          @relation(fields: [userId], references: [id])
-  transactions    Transaction[]
-}
+  id           Int           @id @default(autoincrement())
+  userId       Int           @unique
+  balance      Float         @default(0)
+  createdAt    DateTime      @default(now())
 
-model Plan {
-  id           Int          @id @default(autoincrement())
-  name         String
-  price        Float
-  dailyReturn  Float
-  durationDays Int
-  investments  Investment[]
-}
-
-model Investment {
-  id        Int      @id @default(autoincrement())
-  userId    Int
-  planId    Int
-  startDate DateTime @default(now())
-  endDate   DateTime
-  status    String   @default("ACTIVE")
-  user      User     @relation(fields: [userId], references: [id])
-  plan      Plan     @relation(fields: [planId], references: [id])
+  user         User          @relation(fields: [userId], references: [id])
+  transactions Transaction[]
 }
 
 model Transaction {
-  id          Int      @id @default(autoincrement())
+  id          Int             @id @default(autoincrement())
   walletId    Int
   amount      Float
-  type        String // e.g., 'DEPOSIT', 'WITHDRAWAL', 'YIELD', 'REFERRAL_BONUS', 'PLAN_PURCHASE'
-  description String
-  createdAt   DateTime @default(now())
-  wallet      Wallet   @relation(fields: [walletId], references: [id])
+  type        TransactionType
+  description String?
+  createdAt   DateTime        @default(now())
+
+  wallet      Wallet          @relation(fields: [walletId], references: [id])
 }
 
-model Withdrawal {
-  id         Int      @id @default(autoincrement())
-  userId     Int
-  amount     Float
-  walletType String   // 'balance' or 'referral'
-  status     String   @default("PENDING") // 'PENDING', 'APPROVED', 'REJECTED'
-  reason     String?  // Reason for rejection
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  user       User     @relation(fields: [userId], references: [id])
+model Plan {
+  id         Int       @id @default(autoincrement())
+  name       String
+  price      Float
+  dailyYield Float
+  active     Boolean   @default(true)
+
+  investments Investment[]
 }
 
-// NOVA TABELA PARA CONTROLAR OS DEPÓSITOS PIX
+model Investment {
+  id        Int       @id @default(autoincrement())
+  userId    Int
+  planId    Int
+  status    String    @default("ACTIVE")
+  createdAt DateTime  @default(now())
+
+  user      User      @relation(fields: [userId], references: [id])
+  plan      Plan      @relation(fields: [planId], references: [id])
+}
+
 model PixDeposit {
-  id            Int      @id @default(autoincrement())
+  id            Int              @id @default(autoincrement())
   userId        Int
   amount        Float
-  status        String   @default("PENDING") // PENDING, COMPLETED, EXPIRED
-  txid          String   @unique
-  payloadQrCode String   @db.Text
-  imagemQrcode  String?  @db.Text
+  txid          String           @unique
+  status        PixDepositStatus @default(PENDING)
   efilocId      Int?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  user          User     @relation(fields: [userId], references: [id])
+  payloadQrCode String?
+  imagemQrcode  String?
+  createdAt     DateTime         @default(now())
+
+  user          User             @relation(fields: [userId], references: [id])
 }

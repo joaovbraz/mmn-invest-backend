@@ -24,6 +24,7 @@ const saltRounds = 10;
 // ====== Config ======
 const PUBLIC_URL = process.env.PUBLIC_URL?.replace(/\/+$/, '') || '';
 const DEBUG_SECRET = process.env.DEBUG_SECRET || '';
+const JWT_SECRET = process.env.JWT_SECRET;
 
 // ====== Ranks ======
 const rankThresholds = {
@@ -42,7 +43,7 @@ app.use(express.json({ limit: '1mb' }));
 
 // log básico para depósitos
 app.use((req, _res, next) => {
-  if (req.path.startsWith('/depositos')) {
+  if (req.path.startsWith('/depositos') || req.path.startsWith('/webhooks')) {
     console.log(`[REQ] ${req.method} ${req.path}`, {
       hasAuth: !!(req.headers.authorization || req.headers.Authorization),
     });
@@ -133,7 +134,7 @@ app.post('/login', async (req, res) => {
     if (!ok) return res.status(401).json({ error: 'Senha incorreta.' });
     const token = jwt.sign(
       { userId: user.id, email: user.email, role: user.role },
-      process.env.JWT_SECRET,
+      JWT_SECRET,
       { expiresIn: '8h' }
     );
     const { password: _pw, ...safe } = user;
@@ -192,6 +193,7 @@ app.post('/depositos/pix', protect, async (req, res) => {
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) return res.status(404).json({ error: 'Usuário não encontrado.' });
 
+    // txid único (máx 35); usamos 32
     const txid = crypto.randomBytes(16).toString('hex').slice(0, 32);
 
     const charge = await createImmediateCharge({
@@ -229,7 +231,7 @@ app.post('/depositos/pix', protect, async (req, res) => {
   }
 });
 
-// ---- consulta simples de status (para fallback/polling)
+// ---- consulta simples de status (fallback/polling)
 app.get('/depositos/status/:txid', protect, async (req, res) => {
   const { txid } = req.params;
   try {
@@ -243,6 +245,7 @@ app.get('/depositos/status/:txid', protect, async (req, res) => {
 });
 
 // ====== SSE: stream de confirmação ======
+// Autenticação via token na query string (?token=JWT) — EventSource não manda headers customizados.
 const sseClients = new Map(); // txid -> Set(res)
 
 function sseSend(res, event, data) {
@@ -260,8 +263,15 @@ function notifySse(txid, payload) {
   sseClients.delete(txid);
 }
 
-app.get('/depositos/stream/:txid', protect, async (req, res) => {
+app.get('/depositos/stream/:txid', async (req, res) => {
   const { txid } = req.params;
+  const token = req.query.token;
+  try {
+    const payload = jwt.verify(String(token || ''), JWT_SECRET);
+    req.user = { id: payload.userId };
+  } catch {
+    return res.status(401).end();
+  }
 
   // headers SSE
   res.setHeader('Content-Type', 'text/event-stream');
@@ -300,10 +310,10 @@ app.get('/depositos/stream/:txid', protect, async (req, res) => {
   });
 });
 
-// ====== Webhook Pix (Efí -> nossa API) ======
+// ====== Webhook Pix (Efí -> nossa API)
 app.post('/webhooks/pix', async (req, res) => {
   console.log('Webhook PIX recebido!');
-  const pixData = req.body.pix;
+  const pixData = req.body?.pix;
   if (!Array.isArray(pixData)) return res.status(400).send('Formato inválido.');
 
   for (const pix of pixData) {
@@ -312,6 +322,8 @@ app.post('/webhooks/pix', async (req, res) => {
       await prisma.$transaction(async (tx) => {
         const dep = await tx.pixDeposit.findUnique({ where: { txid } });
         if (!dep || dep.status !== 'PENDING') return;
+
+        // Opcional: validar valor recebido == valor esperado
         if (parseFloat(valor) !== dep.amount) return;
 
         await tx.pixDeposit.update({ where: { id: dep.id }, data: { status: 'COMPLETED' } });
@@ -336,7 +348,6 @@ app.post('/webhooks/pix', async (req, res) => {
 
       // avisa os clientes conectados ao SSE
       notifySse(txid, { status: 'COMPLETED', txid });
-
     } catch (e) {
       console.error(`Erro ao processar webhook txid ${txid}:`, e);
     }
