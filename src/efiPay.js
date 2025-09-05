@@ -14,8 +14,10 @@ const EFI_SANDBOX = process.env.EFI_SANDBOX === 'true';
 // Define o ambiente (produção ou homologação/sandbox)
 const API_URL = EFI_SANDBOX ? 'https://api-pix-h.gerencianet.com.br' : 'https://api-pix.gerencianet.com.br';
 
-// Carrega o certificado
+// Variável para armazenar o agente HTTPS e evitar recriação
 let agent;
+
+// Tenta carregar o certificado e criar o agente HTTPS
 try {
     const certificate = fs.readFileSync(path.resolve(EFI_CERTIFICATE_PATH));
     agent = new https.Agent({
@@ -26,11 +28,17 @@ try {
 } catch (error) {
     console.error('ERRO AO LER O ARQUIVO DE CERTIFICADO:', error.message);
     console.error('Verifique se o caminho em EFI_CERTIFICATE_PATH no arquivo .env está correto e o arquivo existe.');
+    // Se o certificado não puder ser carregado, o 'agent' ficará como 'undefined',
+    // e as funções abaixo irão lançar um erro, o que é o comportamento esperado.
 }
-
 
 // Função para autenticar e obter o token de acesso
 const getAccessToken = async () => {
+    // Se o agente não foi criado, lança um erro para parar a execução
+    if (!agent) {
+        throw new Error('O certificado da Efi não foi carregado. A operação não pode continuar.');
+    }
+
     const credentials = Buffer.from(`${EFI_CLIENT_ID}:${EFI_CLIENT_SECRET}`).toString('base64');
     
     try {
@@ -48,6 +56,7 @@ const getAccessToken = async () => {
         });
         return response.data.access_token;
     } catch (error) {
+        // Aprimorando a mensagem de erro para debug
         console.error('Erro de autenticação com a Efi:', error.response ? error.response.data : error.message);
         throw new Error('Falha na autenticação com o provedor de pagamento.');
     }
@@ -55,8 +64,6 @@ const getAccessToken = async () => {
 
 // Função para criar uma cobrança Pix imediata
 export const createImmediateCharge = async (txid, amount, cpf, name) => {
-    if (!agent) throw new Error('O certificado da Efi não foi carregado. A operação não pode continuar.');
-
     const accessToken = await getAccessToken();
 
     const requestBody = {
@@ -94,8 +101,6 @@ export const createImmediateCharge = async (txid, amount, cpf, name) => {
 
 // Função para gerar o QR Code da cobrança
 export const generateQrCode = async (locationId) => {
-    if (!agent) throw new Error('O certificado da Efi não foi carregado. A operação não pode continuar.');
-
     const accessToken = await getAccessToken();
 
     try {
