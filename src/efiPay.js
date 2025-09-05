@@ -1,4 +1,8 @@
 // src/efiPay.js
+// Integração Efí PIX via HTTP/2 + mTLS (P12)
+// - Sem axios; usa http2 nativo do Node
+// - Exports: createImmediateCharge, generateQrCode, __debugOAuth
+
 import fs from 'fs';
 import path from 'path';
 import http2 from 'http2';
@@ -13,15 +17,15 @@ const {
   CHAVE_PIX,
 } = process.env;
 
-if (
-  !EFI_CLIENT_ID ||
-  !EFI_CLIENT_SECRET ||
-  !(EFI_CERTIFICATE_PATH || EFI_CERTIFICATE_BASE64) ||
-  !CHAVE_PIX
-) {
-  throw new Error(
-    'Faltam variáveis da Efí: EFI_CLIENT_ID, EFI_CLIENT_SECRET, (EFI_CERTIFICATE_PATH ou EFI_CERTIFICATE_BASE64) e CHAVE_PIX.'
-  );
+// ==== validações básicas ====
+if (!EFI_CLIENT_ID || !EFI_CLIENT_SECRET) {
+  throw new Error('Variáveis ausentes: EFI_CLIENT_ID e/ou EFI_CLIENT_SECRET.');
+}
+if (!(EFI_CERTIFICATE_PATH || EFI_CERTIFICATE_BASE64)) {
+  throw new Error('Informe o certificado via EFI_CERTIFICATE_PATH ou EFI_CERTIFICATE_BASE64.');
+}
+if (!CHAVE_PIX) {
+  throw new Error('Variável ausente: CHAVE_PIX (sua chave Pix cadastrada na Efí).');
 }
 
 const BASE_URL =
@@ -31,38 +35,37 @@ const BASE_URL =
 
 const { hostname } = new URL(BASE_URL);
 
-// Carrega o P12 como Buffer
+// ---- carrega o .p12 como Buffer
 function loadP12Buffer() {
   if (EFI_CERTIFICATE_BASE64 && EFI_CERTIFICATE_BASE64.trim()) {
     return Buffer.from(EFI_CERTIFICATE_BASE64.trim(), 'base64');
   }
   const resolved = path.resolve(EFI_CERTIFICATE_PATH);
   if (!fs.existsSync(resolved)) {
-    throw new Error(`Certificado .p12 não encontrado em: ${resolved}`);
+    throw new Error(`[EFI] Certificado .p12 não encontrado em: ${resolved}`);
   }
   return fs.readFileSync(resolved);
 }
 const pfx = loadP12Buffer();
 
-// Faz uma requisição HTTP/2 com mTLS
-function h2Request({ method, path: reqPath, headers = {}, body = null, timeoutMs = 20000 }) {
+// ---- helper de request HTTP/2 com mTLS
+function h2Request({ method, path: reqPath, headers = {}, body = null, timeoutMs = 20000, label = '' }) {
   return new Promise((resolve, reject) => {
     const client = http2.connect(BASE_URL, {
-      // mTLS
       pfx,
       passphrase: EFI_CERTIFICATE_PASSWORD || undefined,
       rejectUnauthorized: true,
-      // ALPN do http2 é negociado automaticamente
       servername: hostname,
     });
 
     const timer = setTimeout(() => {
       try { client.close(); } catch {}
-      reject(new Error('Timeout na requisição HTTP/2.'));
+      reject(new Error(`[EFI] Timeout na requisição HTTP/2 (${label})`));
     }, timeoutMs);
 
     client.on('error', (err) => {
       clearTimeout(timer);
+      console.error(`[EFI] Erro no client HTTP/2 (${label}):`, err?.message || err);
       reject(err);
     });
 
@@ -71,18 +74,20 @@ function h2Request({ method, path: reqPath, headers = {}, body = null, timeoutMs
       ':path': reqPath,
       ':scheme': 'https',
       ':authority': hostname,
-      // cabeçalhos “normais”
       ...Object.fromEntries(Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v])),
     });
 
     let responseHeaders = {};
-    let chunks = [];
+    const chunks = [];
 
-    req.on('response', (hdrs) => {
-      responseHeaders = hdrs;
-    });
-
+    req.on('response', (hdrs) => { responseHeaders = hdrs; });
     req.on('data', (chunk) => chunks.push(chunk));
+    req.on('error', (err) => {
+      clearTimeout(timer);
+      console.error(`[EFI] Erro no stream HTTP/2 (${label}):`, err?.message || err);
+      try { client.close(); } catch {}
+      reject(err);
+    });
 
     req.on('end', () => {
       clearTimeout(timer);
@@ -92,23 +97,16 @@ function h2Request({ method, path: reqPath, headers = {}, body = null, timeoutMs
       client.close();
 
       let data;
-      try {
-        data = text ? JSON.parse(text) : {};
-      } catch {
-        data = { raw: text };
-      }
+      try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
 
       if (status >= 200 && status < 300) {
         resolve({ status, headers: responseHeaders, data });
       } else {
-        reject(Object.assign(new Error('HTTP/2 request failed'), { status, data }));
+        const err = new Error(`[EFI] HTTP/2 falhou (${label})`);
+        err.status = status;
+        err.data = data;
+        reject(err);
       }
-    });
-
-    req.on('error', (err) => {
-      clearTimeout(timer);
-      try { client.close(); } catch {}
-      reject(err);
     });
 
     if (body) req.write(body);
@@ -120,7 +118,7 @@ function basicAuthHeader(id, secret) {
   return 'Basic ' + Buffer.from(`${id}:${secret}`).toString('base64');
 }
 
-// 1) OAuth via HTTP/2 + mTLS
+// ===================== OAuth (HTTP/2 + mTLS) =====================
 async function getAccessToken() {
   const body = new URLSearchParams({
     grant_type: 'client_credentials',
@@ -128,7 +126,7 @@ async function getAccessToken() {
   }).toString();
 
   try {
-    const { data } = await h2Request({
+    const res = await h2Request({
       method: 'POST',
       path: '/oauth/token',
       headers: {
@@ -139,21 +137,25 @@ async function getAccessToken() {
         'host': hostname,
       },
       body,
+      label: 'POST /oauth/token',
     });
 
-    if (!data?.access_token) {
-      throw new Error('Resposta de OAuth sem access_token.');
+    if (!res.data?.access_token) {
+      throw new Error('[EFI] Resposta de OAuth sem access_token');
     }
-    return data.access_token;
+    return res.data.access_token;
   } catch (err) {
-    const status = err?.status;
-    const payload = err?.data ?? err?.message;
-    console.error('Falha no OAuth (HTTP/2) da Efí.', { status, payload });
+    console.error('[EFI] Falha no OAuth (HTTP/2). Status/Payload:', { status: err?.status, data: err?.data });
     throw new Error('Falha na autenticação com o provedor de pagamento.');
   }
 }
 
-// 2) Cria cobrança imediata (PUT /v2/cob/{txid})
+// ==== Export de debug para o /debug/efi-oauth ====
+export async function __debugOAuth() {
+  return getAccessToken();
+}
+
+// ===================== Cobrança imediata =====================
 export async function createImmediateCharge({ txid, amount, cpf, name }) {
   const token = await getAccessToken();
 
@@ -166,7 +168,7 @@ export async function createImmediateCharge({ txid, amount, cpf, name }) {
   });
 
   try {
-    const { data } = await h2Request({
+    const res = await h2Request({
       method: 'PUT',
       path: `/v2/cob/${encodeURIComponent(txid)}`,
       headers: {
@@ -177,23 +179,20 @@ export async function createImmediateCharge({ txid, amount, cpf, name }) {
         'host': hostname,
       },
       body: payload,
+      label: 'PUT /v2/cob/{txid}',
     });
-    // deve conter .loc.id
-    return data;
+    return res.data; // deve conter .loc.id
   } catch (err) {
-    const status = err?.status;
-    const payload = err?.data ?? err?.message;
-    console.error('--- ERRO AO CRIAR COBRANÇA (HTTP/2) NA EFÍ ---');
-    console.error({ status, payload });
+    console.error('--- ERRO AO CRIAR COBRANÇA (HTTP/2) NA EFÍ ---', { status: err?.status, data: err?.data });
     throw new Error('Falha ao criar a cobrança Pix.');
   }
 }
 
-// 3) Gera QR Code (GET /v2/loc/{id}/qrcode)
+// ===================== QR Code =====================
 export async function generateQrCode({ locId }) {
   const token = await getAccessToken();
   try {
-    const { data } = await h2Request({
+    const res = await h2Request({
       method: 'GET',
       path: `/v2/loc/${locId}/qrcode`,
       headers: {
@@ -201,14 +200,11 @@ export async function generateQrCode({ locId }) {
         'authorization': `Bearer ${token}`,
         'host': hostname,
       },
+      label: 'GET /v2/loc/{id}/qrcode',
     });
-    // { qrcode, imagemQrcode }
-    return data;
+    return res.data; // { qrcode, imagemQrcode }
   } catch (err) {
-    const status = err?.status;
-    const payload = err?.data ?? err?.message;
-    console.error('--- ERRO AO GERAR QR CODE (HTTP/2) NA EFÍ ---');
-    console.error({ status, payload });
+    console.error('--- ERRO AO GERAR QR CODE (HTTP/2) NA EFÍ ---', { status: err?.status, data: err?.data });
     throw new Error('Falha ao gerar o QR Code.');
   }
 }
