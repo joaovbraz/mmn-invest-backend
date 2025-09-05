@@ -1,6 +1,6 @@
-// Arquivo: src/efiPay.js (VERSÃO FINAL COM SDK DA DOCUMENTAÇÃO OFICIAL)
+// Arquivo: src/efiPay.js (VERSÃO FINAL COM A CORREÇÃO DA CHAMADA DE FUNÇÃO)
 
-import EfiPay from 'sdk-node-apis-efi'; // MUDANÇA 1: Importa o pacote correto
+import EfiPay from 'sdk-node-apis-efi';
 import path from 'path';
 import fs from 'fs';
 
@@ -50,12 +50,11 @@ export const createImmediateCharge = async (txid, amount, cpf, name) => {
     const params = { txid };
 
     try {
-        // MUDANÇA 2: As funções da API Pix estão dentro de 'efiPay.pix'
-        const chargeResponse = await efiPay.pix.pixCreateImmediateCharge(params, body);
+        // CORREÇÃO: Removido o ".pix" da chamada da função
+        const chargeResponse = await efiPay.pixCreateImmediateCharge(params, body);
         return chargeResponse;
     } catch (error) {
         console.error('--- ERRO DETALHADO AO CRIAR COBRANÇA NA EFÍ ---');
-        // O erro neste SDK vem no formato {nome, mensagem} dentro de error.data
         if (error.data) {
             console.error(error.data);
         } else {
@@ -72,8 +71,8 @@ export const generateQrCode = async (locationId) => {
     };
 
     try {
-        // MUDANÇA 3: As funções da API Pix estão dentro de 'efiPay.pix'
-        const qrCodeResponse = await efiPay.pix.pixGenerateQRCode(params);
+        // CORREÇÃO: Removido o ".pix" da chamada da função
+        const qrCodeResponse = await efiPay.pixGenerateQRCode(params);
         return qrCodeResponse;
     } catch (error) {
         console.error('--- ERRO DETALHADO AO GERAR QR CODE NA EFÍ ---');
