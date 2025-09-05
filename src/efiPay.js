@@ -1,4 +1,4 @@
-// Arquivo: src/efiPay.js (VERSÃO CORRIGIDA)
+// Arquivo: src/efiPay.js (VERSÃO COM LOGS DETALHADOS PARA DEBUG)
 
 import EfiPay from 'gn-api-sdk-node';
 import path from 'path';
@@ -58,8 +58,21 @@ export const createImmediateCharge = async (txid, amount, cpf, name) => {
         const chargeResponse = await efiPay.pixCreateImmediateCharge(params, body);
         return chargeResponse;
     } catch (error) {
-        console.error('Erro ao criar cobrança na Efi:', error.response ? error.response.data : error.message);
-        throw new Error('Falha ao criar a cobrança Pix.');
+        // --- INÍCIO DA MODIFICAÇÃO PARA DEBUG ---
+        console.error('--- ERRO DETALHADO AO CRIAR COBRANÇA NA EFI ---');
+        console.error('Mensagem:', error.message);
+
+        // Se o erro contiver uma resposta da API, imprima os detalhes
+        if (error.response) {
+            console.error('Status da Resposta:', error.response.status);
+            console.error('Dados da Resposta:', JSON.stringify(error.response.data, null, 2));
+        } else {
+            // Se não houver uma resposta, imprime o objeto de erro completo
+            console.error('Objeto de Erro Completo:', JSON.stringify(error, null, 2));
+        }
+        
+        throw new Error('Falha ao criar a cobrança Pix. Verifique os logs para detalhes.');
+        // --- FIM DA MODIFICAÇÃO PARA DEBUG ---
     }
 };
 
@@ -73,7 +86,20 @@ export const generateQrCode = async (locationId) => {
         const qrCodeResponse = await efiPay.pixGenerateQRCode(params);
         return qrCodeResponse;
     } catch (error) {
-        console.error('Erro ao gerar QR Code na Efi:', error.response ? error.response.data : error.message);
-        throw new Error('Falha ao gerar o QR Code.');
+        // --- INÍCIO DA MODIFICAÇÃO PARA DEBUG ---
+        console.error('--- ERRO DETALHADO AO GERAR QR CODE NA EFI ---');
+        console.error('Mensagem:', error.message);
+
+        // Se o erro contiver uma resposta da API, imprima os detalhes
+        if (error.response) {
+            console.error('Status da Resposta:', error.response.status);
+            console.error('Dados da Resposta:', JSON.stringify(error.response.data, null, 2));
+        } else {
+            // Se não houver uma resposta, imprime o objeto de erro completo
+            console.error('Objeto de Erro Completo:', JSON.stringify(error, null, 2));
+        }
+        
+        throw new Error('Falha ao gerar o QR Code. Verifique os logs para detalhes.');
+        // --- FIM DA MODIFICAÇÃO PARA DEBUG ---
     }
 };
