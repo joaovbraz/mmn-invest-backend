@@ -7,6 +7,10 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { protect, admin } from './authMiddleware.js';
 import { processDailyYields } from './jobs/yieldProcessor.js';
+import crypto from 'crypto'; // Importa o módulo crypto
+
+// Importa as novas funções da Efi
+import { createImmediateCharge, generateQrCode } from './efiPay.js';
 
 const app = express();
 const prisma = new PrismaClient();
@@ -122,7 +126,6 @@ app.get('/meus-dados', protect, async (req, res) => {
     } catch (error) { res.status(500).json({ error: "Não foi possível buscar os dados do usuário."}) }
 });
 
-// ROTA ADICIONADA PARA ATUALIZAR O PERFIL
 app.put('/meus-dados', protect, async (req, res) => {
   try {
     const userId = req.user.id;
@@ -141,6 +144,134 @@ app.put('/meus-dados', protect, async (req, res) => {
     res.status(500).json({ error: "Não foi possível atualizar os dados do perfil." });
   }
 });
+
+// ============================= ROTAS DE DEPÓSITO PIX =================================
+app.post('/depositos/pix', protect, async (req, res) => {
+    const userId = req.user.id;
+    const { amount, cpf } = req.body;
+
+    if (!amount || amount <= 0) {
+        return res.status(400).json({ error: "O valor do depósito deve ser positivo." });
+    }
+    if (!cpf) {
+        return res.status(400).json({ error: "O CPF é obrigatório para gerar a cobrança Pix." });
+    }
+
+    try {
+        const user = await prisma.user.findUnique({ where: { id: userId } });
+        if (!user) {
+            return res.status(404).json({ error: 'Usuário não encontrado.' });
+        }
+
+        const txid = crypto.randomBytes(16).toString('hex').slice(0, 32);
+
+        // 1. Cria a cobrança na Efi
+        const chargeResponse = await createImmediateCharge(txid, amount, cpf, user.name);
+        const locationId = chargeResponse.loc.id;
+
+        // 2. Gera o QR Code para essa cobrança
+        const qrCodeResponse = await generateQrCode(locationId);
+
+        // 3. Salva a tentativa de depósito no nosso banco de dados
+        await prisma.pixDeposit.create({
+            data: {
+                userId: userId,
+                amount: amount,
+                txid: txid,
+                status: 'PENDING',
+                efilocId: locationId,
+                payloadQrCode: qrCodeResponse.qrcode,
+                imagemQrcode: qrCodeResponse.imagemQrcode,
+            }
+        });
+
+        // 4. Retorna o QR Code para o frontend
+        res.status(201).json({
+            qrCode: qrCodeResponse.qrcode,
+            qrCodeImage: qrCodeResponse.imagemQrcode
+        });
+
+    } catch (error) {
+        console.error("Erro ao processar depósito Pix:", error);
+        res.status(500).json({ error: "Não foi possível gerar a cobrança Pix." });
+    }
+});
+
+
+// ROTA DE WEBHOOK PARA RECEBER CONFIRMAÇÃO DA EFI
+app.post('/webhooks/pix', async (req, res) => {
+    console.log('Webhook PIX recebido!');
+    
+    // O webhook da Efi envia um array 'pix'
+    const pixData = req.body.pix;
+
+    if (!pixData || !Array.isArray(pixData)) {
+        console.log('Webhook ignorado: formato inválido.');
+        return res.status(400).send('Formato de webhook inválido.');
+    }
+
+    // A Efi pode enviar mais de uma notificação por vez
+    for (const pix of pixData) {
+        const { txid, valor } = pix;
+
+        try {
+            // Usamos uma transação do Prisma para garantir que tudo aconteça junto
+            await prisma.$transaction(async (prisma) => {
+                // 1. Encontra o depósito pendente no nosso banco
+                const deposit = await prisma.pixDeposit.findUnique({ where: { txid: txid } });
+
+                // 2. Verifica se o depósito existe e se ainda está pendente
+                if (!deposit || deposit.status !== 'PENDING') {
+                    console.log(`Depósito com txid ${txid} não encontrado ou já processado.`);
+                    return; // Ignora a notificação
+                }
+                
+                // 3. Valida o valor
+                if (parseFloat(valor) !== deposit.amount) {
+                    console.warn(`Alerta de segurança: Valor do webhook (${valor}) diferente do valor registrado (${deposit.amount}) para o txid ${txid}.`);
+                    // Pode-se implementar uma lógica de segurança aqui, por enquanto, vamos recusar.
+                    return;
+                }
+
+                // 4. Atualiza o status do depósito para 'COMPLETED'
+                await prisma.pixDeposit.update({
+                    where: { id: deposit.id },
+                    data: { status: 'COMPLETED' },
+                });
+
+                // 5. Encontra a carteira do usuário
+                const wallet = await prisma.wallet.findUnique({ where: { userId: deposit.userId } });
+                if (!wallet) throw new Error(`Carteira para o usuário ${deposit.userId} não encontrada.`);
+
+                // 6. Adiciona o saldo na carteira do usuário
+                await prisma.wallet.update({
+                    where: { id: wallet.id },
+                    data: { balance: { increment: deposit.amount } },
+                });
+
+                // 7. Cria um registro da transação no extrato
+                await prisma.transaction.create({
+                    data: {
+                        walletId: wallet.id,
+                        amount: deposit.amount,
+                        type: 'DEPOSIT',
+                        description: `Depósito via Pix aprovado (txid: ${txid})`,
+                    },
+                });
+
+                console.log(`Depósito de ${deposit.amount} creditado para o usuário ${deposit.userId} (txid: ${txid}).`);
+            });
+        } catch (error) {
+            console.error(`Erro ao processar o webhook para o txid ${txid}:`, error);
+            // Se der erro, a Efi tentará enviar novamente. Não enviamos status de erro aqui.
+        }
+    }
+
+    // Responde para a Efi que recebemos a notificação com sucesso.
+    res.status(200).send('OK');
+});
+
+// ====================================================================================
 
 app.get('/planos', async (req, res) => {
   try {
