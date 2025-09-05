@@ -1,4 +1,4 @@
-// Arquivo: src/efiPay.js (NOVO ARQUIVO)
+// Arquivo: src/efiPay.js (VERSÃO CORRIGIDA E MAIS SEGURA)
 
 import axios from 'axios';
 import fs from 'fs';
@@ -11,12 +11,21 @@ const EFI_CLIENT_SECRET = process.env.EFI_CLIENT_SECRET;
 const EFI_CERTIFICATE_PATH = process.env.EFI_CERTIFICATE_PATH;
 const EFI_SANDBOX = process.env.EFI_SANDBOX === 'true';
 
+// ======================= NOVA VERIFICAÇÃO =======================
+// Verifica se as variáveis de ambiente essenciais foram carregadas
+if (!EFI_CLIENT_ID || !EFI_CLIENT_SECRET || !EFI_CERTIFICATE_PATH) {
+    console.error('ERRO CRÍTICO: As variáveis de ambiente da Efi (EFI_CLIENT_ID, EFI_CLIENT_SECRET, EFI_CERTIFICATE_PATH) não foram configuradas.');
+    console.error('Verifique seu arquivo .env ou as configurações de ambiente no painel de hospedagem (Render).');
+    // Encerra a aplicação ou impede a continuação para evitar erros inesperados.
+    // Em um cenário real, você pode querer lançar um erro que impeça o servidor de iniciar.
+}
+// =================================================================
+
 // Define o ambiente (produção ou homologação/sandbox)
 const API_URL = EFI_SANDBOX ? 'https://api-pix-h.gerencianet.com.br' : 'https://api-pix.gerencianet.com.br';
 
 // Carrega o certificado
 let agent;
-let certificateError = null; // Variável para rastrear erros no certificado
 try {
     const certificate = fs.readFileSync(path.resolve(EFI_CERTIFICATE_PATH));
     agent = new https.Agent({
@@ -27,14 +36,15 @@ try {
 } catch (error) {
     console.error('ERRO AO LER O ARQUIVO DE CERTIFICADO:', error.message);
     console.error('Verifique se o caminho em EFI_CERTIFICATE_PATH no arquivo .env está correto e o arquivo existe.');
-    certificateError = new Error('O certificado da Efi não pôde ser carregado. Verifique o caminho e as permissões do arquivo.');
+    agent = null; // Garante que o agent é nulo se o certificado falhar
 }
+
 
 // Função para autenticar e obter o token de acesso
 const getAccessToken = async () => {
-    // Adiciona uma verificação antecipada para o erro do certificado
-    if (certificateError) {
-        throw certificateError;
+    // Adicionamos uma verificação para não prosseguir se as credenciais não foram carregadas
+    if (!EFI_CLIENT_ID || !EFI_CLIENT_SECRET) {
+        throw new Error('Client ID ou Client Secret da Efi não estão definidos.');
     }
 
     const credentials = Buffer.from(`${EFI_CLIENT_ID}:${EFI_CLIENT_SECRET}`).toString('base64');
@@ -54,7 +64,6 @@ const getAccessToken = async () => {
         });
         return response.data.access_token;
     } catch (error) {
-        // Loga o erro de forma mais clara, se possível
         console.error('Erro de autenticação com a Efi:', error.response ? error.response.data : error.message);
         throw new Error('Falha na autenticação com o provedor de pagamento.');
     }
@@ -62,8 +71,8 @@ const getAccessToken = async () => {
 
 // Função para criar uma cobrança Pix imediata
 export const createImmediateCharge = async (txid, amount, cpf, name) => {
-    // A validação `if (!agent)` já está presente, o que é bom.
-    // A chamada para `getAccessToken` agora tratará o erro do certificado.
+    if (!agent) throw new Error('O certificado da Efi não foi carregado. A operação não pode continuar.');
+
     const accessToken = await getAccessToken();
 
     const requestBody = {
@@ -101,8 +110,8 @@ export const createImmediateCharge = async (txid, amount, cpf, name) => {
 
 // Função para gerar o QR Code da cobrança
 export const generateQrCode = async (locationId) => {
-    // A validação `if (!agent)` já está presente, o que é bom.
-    // A chamada para `getAccessToken` agora tratará o erro do certificado.
+    if (!agent) throw new Error('O certificado da Efi não foi carregado. A operação não pode continuar.');
+
     const accessToken = await getAccessToken();
 
     try {
