@@ -22,6 +22,7 @@ try {
         pfx: certificate,
         passphrase: ''
     });
+    console.log('Certificado da Efi carregado com sucesso.');
 } catch (error) {
     console.error('ERRO AO LER O ARQUIVO DE CERTIFICADO:', error.message);
     console.error('Verifique se o caminho em EFI_CERTIFICATE_PATH no arquivo .env está correto e o arquivo existe.');
@@ -69,8 +70,8 @@ export const createImmediateCharge = async (txid, amount, cpf, name) => {
         valor: {
             original: amount.toFixed(2).toString() // Formata para duas casas decimais
         },
-        chave: process.env.CHAVE_PIX, // Você precisa adicionar sua chave PIX no .env
-        solicitacaoPagador: 'Depósito em plataforma TDP Invest'
+        chave: process.env.CHAVE_PIX,
+        solicitacaoPagador: 'Depósito em plataforma'
     };
 
     try {
