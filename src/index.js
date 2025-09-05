@@ -101,14 +101,14 @@ app.post('/login', async (req, res) => {
 app.get('/meus-dados', protect, async (req, res) => {
     try {
         const userId = req.user.id;
-        const userWithDetails = await prisma.user.findUnique({ 
-          where: { id: userId }, 
-          include: { 
+        const userWithDetails = await prisma.user.findUnique({
+          where: { id: userId },
+          include: {
             wallet: true,
             _count: {
               select: { referees: true }
-            } 
-          } 
+            }
+          }
         });
         if (!userWithDetails) { return res.status(404).json({ error: 'Usuário não encontrado.' }); }
 
@@ -117,10 +117,10 @@ app.get('/meus-dados', protect, async (req, res) => {
 
         delete userWithDetails.password;
 
-        const responseData = { 
-          ...userWithDetails, 
+        const responseData = {
+          ...userWithDetails,
           totalInvested: totalInvested,
-          referralCount: userWithDetails._count.referees 
+          referralCount: userWithDetails._count.referees
         };
         res.status(200).json(responseData);
     } catch (error) { res.status(500).json({ error: "Não foi possível buscar os dados do usuário."}) }
@@ -201,7 +201,7 @@ app.post('/depositos/pix', protect, async (req, res) => {
 // ROTA DE WEBHOOK PARA RECEBER CONFIRMAÇÃO DA EFI
 app.post('/webhooks/pix', async (req, res) => {
     console.log('Webhook PIX recebido!');
-    
+
     // O webhook da Efi envia um array 'pix'
     const pixData = req.body.pix;
 
@@ -225,7 +225,7 @@ app.post('/webhooks/pix', async (req, res) => {
                     console.log(`Depósito com txid ${txid} não encontrado ou já processado.`);
                     return; // Ignora a notificação
                 }
-                
+
                 // 3. Valida o valor
                 if (parseFloat(valor) !== deposit.amount) {
                     console.warn(`Alerta de segurança: Valor do webhook (${valor}) diferente do valor registrado (${deposit.amount}) para o txid ${txid}.`);
@@ -450,7 +450,7 @@ app.post('/processar-rendimentos', (req, res) => {
     return res.status(401).json({ error: 'Acesso não autorizado.' });
   }
   res.status(202).json({ message: "Processamento de rendimentos iniciado em segundo plano." });
-  processDailyYields(); 
+  processDailyYields();
 });
 
 const PORT = process.env.PORT || 10000;
