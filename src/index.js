@@ -8,7 +8,6 @@ import crypto from 'crypto';
 
 import { protect, admin } from './authMiddleware.js';
 import { processDailyYields } from './jobs/yieldProcessor.js';
-
 import { createImmediateCharge, generateQrCode } from './efiPay.js';
 
 const app = express();
@@ -175,7 +174,7 @@ app.post('/depositos/pix', protect, async (req, res) => {
 
     const txid = crypto.randomBytes(16).toString('hex').slice(0, 32);
 
-    // 1) Cria a cobrança
+    // 1) Cria a cobrança (PUT /v2/cob/{txid})
     const charge = await createImmediateCharge({
       txid,
       amount: Number(amount),
@@ -213,7 +212,7 @@ app.post('/depositos/pix', protect, async (req, res) => {
   }
 });
 
-// Webhook Pix (Efí -> seu backend)
+// Webhook Pix
 app.post('/webhooks/pix', async (req, res) => {
   console.log('Webhook PIX recebido!');
   const pixData = req.body.pix;
@@ -255,7 +254,6 @@ app.post('/webhooks/pix', async (req, res) => {
 });
 
 // (demais rotas/cron iguais)
-
 app.post('/processar-rendimentos', (req, res) => {
   const { secret } = req.body;
   if (secret !== process.env.CRON_SECRET) {
