@@ -1,75 +1,138 @@
 // src/efiPay.js
-import EfiPay from 'sdk-node-apis-efi';
-import path from 'path';
 import fs from 'fs';
+import path from 'path';
+import https from 'https';
+import axios from 'axios';
 
-// Variáveis de ambiente
 const {
   EFI_CLIENT_ID,
   EFI_CLIENT_SECRET,
   EFI_CERTIFICATE_PATH,
+  EFI_CERTIFICATE_BASE64,
+  EFI_CERTIFICATE_PASSWORD,
   EFI_SANDBOX,
   CHAVE_PIX,
 } = process.env;
 
-// Validações básicas
-if (!EFI_CLIENT_ID || !EFI_CLIENT_SECRET || !EFI_CERTIFICATE_PATH || !CHAVE_PIX) {
+if (!EFI_CLIENT_ID || !EFI_CLIENT_SECRET || !(EFI_CERTIFICATE_PATH || EFI_CERTIFICATE_BASE64) || !CHAVE_PIX) {
   throw new Error(
-    'Variáveis de ambiente da Efí ausentes: verifique EFI_CLIENT_ID, EFI_CLIENT_SECRET, EFI_CERTIFICATE_PATH e CHAVE_PIX.'
+    'Faltam variáveis da Efí: EFI_CLIENT_ID, EFI_CLIENT_SECRET, (EFI_CERTIFICATE_PATH ou EFI_CERTIFICATE_BASE64) e CHAVE_PIX.'
   );
 }
 
-// Garante caminho absoluto do certificado e existência do arquivo
-const certPath = path.resolve(EFI_CERTIFICATE_PATH);
-if (!fs.existsSync(certPath)) {
-  console.error('ERRO: Arquivo de certificado não encontrado:', certPath);
-  process.exit(1);
+const BASE_URL =
+  String(EFI_SANDBOX).toLowerCase() === 'true'
+    ? 'https://api-pix-h.gerencianet.com.br'
+    : 'https://api-pix.gerencianet.com.br';
+
+// Carrega o certificado P12 (arquivo ou Base64) em Buffer
+function loadP12Buffer() {
+  if (EFI_CERTIFICATE_BASE64 && EFI_CERTIFICATE_BASE64.trim()) {
+    try {
+      return Buffer.from(EFI_CERTIFICATE_BASE64.trim(), 'base64');
+    } catch (e) {
+      console.error('Falha ao decodificar EFI_CERTIFICATE_BASE64. Verifique se é Base64 válido.');
+      throw e;
+    }
+  }
+  const resolved = path.resolve(EFI_CERTIFICATE_PATH);
+  if (!fs.existsSync(resolved)) {
+    throw new Error(`Certificado não encontrado em: ${resolved}`);
+  }
+  return fs.readFileSync(resolved);
 }
 
-// Instancia o SDK
-const efipay = new EfiPay({
-  client_id: EFI_CLIENT_ID,
-  client_secret: EFI_CLIENT_SECRET,
-  certificate: certPath,
-  sandbox: String(EFI_SANDBOX).toLowerCase() === 'true',
-  timeout: 30000,
+const pfx = loadP12Buffer();
+
+// Agent TLS com P12
+const httpsAgent = new https.Agent({
+  pfx,
+  passphrase: EFI_CERTIFICATE_PASSWORD || undefined, // se seu .p12 tiver senha
+  rejectUnauthorized: true,
 });
 
-console.log('SDK da Efí inicializado com sucesso.');
+// Helpers
+function basicAuthHeader(id, secret) {
+  return 'Basic ' + Buffer.from(`${id}:${secret}`).toString('base64');
+}
 
-// Cria cobrança imediata Pix
-export async function createImmediateCharge(txid, amount, cpf, name) {
-  const body = {
+// 1) OAuth — pega o access_token usando mTLS + Basic
+async function getAccessToken() {
+  const url = `${BASE_URL}/oauth/token`;
+  const headers = {
+    'Content-Type': 'application/x-www-form-urlencoded',
+    Authorization: basicAuthHeader(EFI_CLIENT_ID, EFI_CLIENT_SECRET),
+  };
+  const body = new URLSearchParams({
+    grant_type: 'client_credentials',
+    scope: 'cob.read cob.write pix.read pix.write',
+  }).toString();
+
+  try {
+    const { data } = await axios.post(url, body, { httpsAgent, headers, timeout: 20000 });
+    if (!data?.access_token) {
+      throw new Error('Resposta de OAuth sem access_token.');
+    }
+    return data.access_token;
+  } catch (err) {
+    const status = err?.response?.status;
+    const payload = err?.response?.data;
+    console.error('Falha no OAuth da Efí.', { status, payload: payload ?? err?.message });
+    throw new Error('Falha na autenticação com o provedor de pagamento.');
+  }
+}
+
+// 2) Cria cobrança imediata Pix
+export async function createImmediateCharge({ txid, amount, cpf, name }) {
+  const token = await getAccessToken();
+
+  const payload = {
     calendario: { expiracao: 3600 },
     devedor: { cpf: String(cpf).replace(/\D/g, ''), nome: name || 'Cliente' },
-    valor: { original: Number(amount).toFixed(2) },
-    chave: CHAVE_PIX,
+    valor: { original: Number(amount).toFixed(2) }, // "0.00"
+    chave: CHAVE_PIX, // sua chave Pix cadastrada na conta Efí de PRODUÇÃO
     solicitacaoPagador: 'Depósito em plataforma',
   };
 
-  const params = { txid };
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    'Content-Type': 'application/json',
+  };
 
   try {
-    // ✅ correção: método é de nível superior (não use efipay.pix.*)
-    const response = await efipay.pixCreateImmediateCharge(params, body);
-    return response;
+    const { data } = await axios.post(`${BASE_URL}/v2/cob?txid=${encodeURIComponent(txid)}`, payload, {
+      httpsAgent,
+      headers,
+      timeout: 20000,
+    });
+    return data; // deve conter data.loc.id
   } catch (err) {
-    console.error('--- ERRO DETALHADO AO CRIAR COBRANÇA NA EFÍ ---');
-    console.error(err?.response?.data ?? err?.data ?? err);
+    const status = err?.response?.status;
+    const payload = err?.response?.data;
+    console.error('--- ERRO AO CRIAR COBRANÇA NA EFÍ ---');
+    console.error({ status, payload: payload ?? err?.message });
     throw new Error('Falha ao criar a cobrança Pix.');
   }
 }
 
-// Gera QR Code da cobrança
-export async function generateQrCode(locationId) {
-  const params = { id: locationId };
+// 3) Gera QR Code a partir do loc.id
+export async function generateQrCode({ locId }) {
+  const token = await getAccessToken();
+  const headers = { Authorization: `Bearer ${token}` };
+
   try {
-    // ✅ correção: método é de nível superior
-    const response = await efipay.pixGenerateQRCode(params);
-    return response;
+    const { data } = await axios.get(`${BASE_URL}/v2/loc/${locId}/qrcode`, {
+      httpsAgent,
+      headers,
+      timeout: 20000,
+    });
+    // Retorna { qrcode, imagemQrcode (data:image/png;base64,...) }
+    return data;
   } catch (err) {
-    console.error('--- ERRO DETALHADO AO GERAR QR CODE NA EFÍ ---');
-    console.error(err?.response?.data ?? err?.data ?? err);
+    const status = err?.response?.status;
+    const payload = err?.response?.data;
+    console.error('--- ERRO AO GERAR QR CODE NA EFÍ ---');
+    console.error({ status, payload: payload ?? err?.message });
     throw new Error('Falha ao gerar o QR Code.');
   }
 }
