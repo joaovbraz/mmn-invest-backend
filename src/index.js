@@ -8,7 +8,7 @@ import crypto from 'crypto';
 
 import { protect, admin } from './authMiddleware.js';
 import { processDailyYields } from './jobs/yieldProcessor.js';
-import { createImmediateCharge, generateQrCode } from './efiPay.js';
+import { createImmediateCharge, generateQrCode, __debugOAuth } from './efiPay.js';
 
 const app = express();
 const prisma = new PrismaClient();
@@ -23,16 +23,41 @@ const rankThresholds = {
   Bronze: 0,
 };
 
-function addBusinessDays(startDate, days) {
-  let currentDate = new Date(startDate);
-  let addedDays = 0;
-  while (addedDays < days) {
-    currentDate.setDate(currentDate.getDate() + 1);
-    const dow = currentDate.getDay();
-    if (dow !== 0 && dow !== 6) addedDays++;
+// ---------- middlewares base ----------
+app.use(cors());
+app.use(express.json({ limit: '1mb' }));
+
+// Logger simples para ver se a requisição chega e se traz Authorization
+app.use((req, _res, next) => {
+  if (req.path.startsWith('/depositos')) {
+    console.log(`[REQ] ${req.method} ${req.path}`, {
+      hasAuth: !!(req.headers.authorization || req.headers.Authorization),
+    });
   }
-  return currentDate;
-}
+  next();
+});
+
+app.get('/', (_req, res) => res.json({ message: 'API do TDP INVEST funcionando!' }));
+
+// ---------- rota de debug do OAuth (proteja com DEBUG_SECRET) ----------
+app.get('/debug/efi-oauth', async (req, res) => {
+  try {
+    const secret = req.query.secret || req.headers['x-debug-secret'];
+    if (!process.env.DEBUG_SECRET || secret !== process.env.DEBUG_SECRET) {
+      return res.status(403).json({ ok: false, error: 'forbidden' });
+    }
+    const token = await __debugOAuth();
+    return res.json({ ok: true, tokenPreview: token.slice(0, 16) + '...' });
+  } catch (e) {
+    console.error('[DEBUG] OAuth falhou:', e?.message);
+    return res.status(500).json({ ok: false, error: e?.message || 'erro' });
+  }
+});
+
+// ---------- helpers ----------
+const rankKeys = Object.keys(rankThresholds).sort(
+  (a, b) => rankThresholds[b] - rankThresholds[a]
+);
 
 async function updateUserRankByTotalInvestment(userId) {
   try {
@@ -42,34 +67,19 @@ async function updateUserRankByTotalInvestment(userId) {
     });
     const total = invs.reduce((s, i) => s + i.plan.price, 0);
     let newRank = 'Bronze';
-    const keys = Object.keys(rankThresholds).sort((a, b) => rankThresholds[b] - rankThresholds[a]);
-    for (const k of keys) if (total >= rankThresholds[k]) { newRank = k; break; }
+    for (const k of rankKeys) {
+      if (total >= rankThresholds[k]) {
+        newRank = k;
+        break;
+      }
+    }
     await prisma.user.update({ where: { id: userId }, data: { rank: newRank } });
   } catch (e) {
     console.error('Erro ao atualizar rank:', e);
   }
 }
 
-async function getNetworkLevels(userIds, currentLevel = 1, maxLevel = 10) {
-  if (!userIds?.length || currentLevel > maxLevel) return [];
-  const refs = await prisma.user.findMany({
-    where: { referrerId: { in: userIds } },
-    select: { id: true, name: true, email: true, createdAt: true, referrerId: true },
-  });
-  if (!refs.length) return [];
-  const nextIds = refs.map(r => r.id);
-  const sub = await getNetworkLevels(nextIds, currentLevel + 1, maxLevel);
-  const cur = refs.map(r => ({ ...r, level: currentLevel }));
-  return [...cur, ...sub];
-}
-
-app.use(cors());
-app.use(express.json());
-
-app.get('/', (_req, res) => res.json({ message: 'API do TDP INVEST funcionando!' }));
-
-// ======================= AUTENTICAÇÃO =======================
-
+// ---------- auth ----------
 app.post('/criar-usuario', async (req, res) => {
   const { email, name, password, referrerCode } = req.body;
   if (!email || !name || !password) {
@@ -82,24 +92,29 @@ app.post('/criar-usuario', async (req, res) => {
       const ref = await prisma.user.findUnique({ where: { referralCode: referrerCode } });
       if (ref) referrerId = ref.id;
     }
-    const newCode = (name.substring(0, 4).toUpperCase() || 'USER') + Math.floor(10000 + Math.random() * 90000);
+    const newCode =
+      (name.substring(0, 4).toUpperCase() || 'USER') +
+      Math.floor(10000 + Math.random() * 90000);
     const user = await prisma.$transaction(async (tx) => {
       const u = await tx.user.create({
         data: { email, name, password: hashed, referralCode: newCode, referrerId },
       });
       await tx.wallet.create({ data: { userId: u.id } });
       if (referrerId) {
-        await tx.user.update({ where: { id: referrerId }, data: { careerPoints: { increment: 10 } } });
+        await tx.user.update({
+          where: { id: referrerId },
+          data: { careerPoints: { increment: 10 } },
+        });
       }
       return u;
     });
     const { password: _pw, ...safe } = user;
-    res.status(201).json(safe);
+    return res.status(201).json(safe);
   } catch (error) {
     if (error.code === 'P2002') {
       return res.status(409).json({ error: 'Este email ou código de convite já está em uso.' });
     }
-    res.status(400).json({ error: `Erro técnico rastreado: ${error.message}` });
+    return res.status(400).json({ error: `Erro técnico rastreado: ${error.message}` });
   }
 });
 
@@ -116,14 +131,13 @@ app.post('/login', async (req, res) => {
       { expiresIn: '8h' }
     );
     const { password: _pw, ...safe } = user;
-    res.status(200).json({ message: 'Login bem-sucedido!', user: safe, token });
+    return res.status(200).json({ message: 'Login bem-sucedido!', user: safe, token });
   } catch {
-    res.status(500).json({ error: 'Ocorreu um erro interno no servidor.' });
+    return res.status(500).json({ error: 'Ocorreu um erro interno no servidor.' });
   }
 });
 
-// ======================= PERFIL & DADOS =======================
-
+// ---------- dados do usuário ----------
 app.get('/meus-dados', protect, async (req, res) => {
   try {
     const userId = req.user.id;
@@ -135,9 +149,10 @@ app.get('/meus-dados', protect, async (req, res) => {
     const invs = await prisma.investment.findMany({ where: { userId }, include: { plan: true } });
     const totalInvested = invs.reduce((s, i) => s + i.plan.price, 0);
     const { password: _pw, ...safe } = u;
-    res.status(200).json({ ...safe, totalInvested, referralCount: safe._count.referees });
-  } catch {
-    res.status(500).json({ error: 'Não foi possível buscar os dados do usuário.' });
+    return res.status(200).json({ ...safe, totalInvested, referralCount: safe._count.referees });
+  } catch (e) {
+    console.error('[meus-dados] erro:', e);
+    return res.status(500).json({ error: 'Não foi possível buscar os dados do usuário.' });
   }
 });
 
@@ -148,15 +163,14 @@ app.put('/meus-dados', protect, async (req, res) => {
     if (!name) return res.status(400).json({ error: 'O nome é obrigatório.' });
     const u = await prisma.user.update({ where: { id: userId }, data: { name, phone } });
     const { password: _pw, ...safe } = u;
-    res.status(200).json(safe);
+    return res.status(200).json(safe);
   } catch (e) {
-    console.error('Erro ao atualizar perfil:', e);
-    res.status(500).json({ error: 'Não foi possível atualizar os dados do perfil.' });
+    console.error('[meus-dados PUT] erro:', e);
+    return res.status(500).json({ error: 'Não foi possível atualizar os dados do perfil.' });
   }
 });
 
-// ======================= DEPÓSITO PIX =======================
-
+// ---------- DEPÓSITO PIX ----------
 app.post('/depositos/pix', protect, async (req, res) => {
   const userId = req.user.id;
   const { amount, cpf } = req.body;
@@ -174,7 +188,6 @@ app.post('/depositos/pix', protect, async (req, res) => {
 
     const txid = crypto.randomBytes(16).toString('hex').slice(0, 32);
 
-    // 1) Cria a cobrança (PUT /v2/cob/{txid})
     const charge = await createImmediateCharge({
       txid,
       amount: Number(amount),
@@ -185,10 +198,8 @@ app.post('/depositos/pix', protect, async (req, res) => {
     const locId = charge?.loc?.id;
     if (!locId) throw new Error('LOC não retornado pela Efí.');
 
-    // 2) Gera o QR Code
     const qr = await generateQrCode({ locId });
 
-    // 3) Persiste a tentativa
     await prisma.pixDeposit.create({
       data: {
         userId,
@@ -201,18 +212,17 @@ app.post('/depositos/pix', protect, async (req, res) => {
       },
     });
 
-    // 4) Responde para o frontend
-    res.status(201).json({
+    return res.status(201).json({
       qrCode: qr.qrcode,
       qrCodeImage: qr.imagemQrcode,
     });
   } catch (error) {
-    console.error('Erro ao processar depósito Pix:', error);
-    res.status(500).json({ error: 'Não foi possível gerar a cobrança Pix.' });
+    console.error('[depositos/pix] erro:', error?.message, error);
+    return res.status(500).json({ error: 'Não foi possível gerar a cobrança Pix.' });
   }
 });
 
-// Webhook Pix
+// ---------- Webhook Pix ----------
 app.post('/webhooks/pix', async (req, res) => {
   console.log('Webhook PIX recebido!');
   const pixData = req.body.pix;
@@ -250,10 +260,10 @@ app.post('/webhooks/pix', async (req, res) => {
     }
   }
 
-  res.status(200).send('OK');
+  return res.status(200).send('OK');
 });
 
-// (demais rotas/cron iguais)
+// ---------- CRON ----------
 app.post('/processar-rendimentos', (req, res) => {
   const { secret } = req.body;
   if (secret !== process.env.CRON_SECRET) {
@@ -261,6 +271,12 @@ app.post('/processar-rendimentos', (req, res) => {
   }
   res.status(202).json({ message: 'Processamento de rendimentos iniciado.' });
   processDailyYields();
+});
+
+// ---------- ERROR HANDLER GLOBAL ----------
+app.use((err, req, res, next) => {
+  console.error('[UNHANDLED ERROR]', err);
+  res.status(500).json({ error: 'Erro interno.' });
 });
 
 const PORT = process.env.PORT || 10000;
