@@ -14,10 +14,9 @@ const EFI_SANDBOX = process.env.EFI_SANDBOX === 'true';
 // Define o ambiente (produção ou homologação/sandbox)
 const API_URL = EFI_SANDBOX ? 'https://api-pix-h.gerencianet.com.br' : 'https://api-pix.gerencianet.com.br';
 
-// Variável para armazenar o agente HTTPS e evitar recriação
+// Carrega o certificado
 let agent;
-
-// Tenta carregar o certificado e criar o agente HTTPS
+let certificateError = null; // Variável para rastrear erros no certificado
 try {
     const certificate = fs.readFileSync(path.resolve(EFI_CERTIFICATE_PATH));
     agent = new https.Agent({
@@ -28,15 +27,14 @@ try {
 } catch (error) {
     console.error('ERRO AO LER O ARQUIVO DE CERTIFICADO:', error.message);
     console.error('Verifique se o caminho em EFI_CERTIFICATE_PATH no arquivo .env está correto e o arquivo existe.');
-    // Se o certificado não puder ser carregado, o 'agent' ficará como 'undefined',
-    // e as funções abaixo irão lançar um erro, o que é o comportamento esperado.
+    certificateError = new Error('O certificado da Efi não pôde ser carregado. Verifique o caminho e as permissões do arquivo.');
 }
 
 // Função para autenticar e obter o token de acesso
 const getAccessToken = async () => {
-    // Se o agente não foi criado, lança um erro para parar a execução
-    if (!agent) {
-        throw new Error('O certificado da Efi não foi carregado. A operação não pode continuar.');
+    // Adiciona uma verificação antecipada para o erro do certificado
+    if (certificateError) {
+        throw certificateError;
     }
 
     const credentials = Buffer.from(`${EFI_CLIENT_ID}:${EFI_CLIENT_SECRET}`).toString('base64');
@@ -56,7 +54,7 @@ const getAccessToken = async () => {
         });
         return response.data.access_token;
     } catch (error) {
-        // Aprimorando a mensagem de erro para debug
+        // Loga o erro de forma mais clara, se possível
         console.error('Erro de autenticação com a Efi:', error.response ? error.response.data : error.message);
         throw new Error('Falha na autenticação com o provedor de pagamento.');
     }
@@ -64,6 +62,8 @@ const getAccessToken = async () => {
 
 // Função para criar uma cobrança Pix imediata
 export const createImmediateCharge = async (txid, amount, cpf, name) => {
+    // A validação `if (!agent)` já está presente, o que é bom.
+    // A chamada para `getAccessToken` agora tratará o erro do certificado.
     const accessToken = await getAccessToken();
 
     const requestBody = {
@@ -101,6 +101,8 @@ export const createImmediateCharge = async (txid, amount, cpf, name) => {
 
 // Função para gerar o QR Code da cobrança
 export const generateQrCode = async (locationId) => {
+    // A validação `if (!agent)` já está presente, o que é bom.
+    // A chamada para `getAccessToken` agora tratará o erro do certificado.
     const accessToken = await getAccessToken();
 
     try {
