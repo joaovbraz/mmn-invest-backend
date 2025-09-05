@@ -1,4 +1,4 @@
-// Arquivo: src/efiPay.js (VERSÃO CORRIGIDA E MAIS SEGURA)
+// Arquivo: src/efiPay.js
 
 import axios from 'axios';
 import fs from 'fs';
@@ -10,16 +10,6 @@ const EFI_CLIENT_ID = process.env.EFI_CLIENT_ID;
 const EFI_CLIENT_SECRET = process.env.EFI_CLIENT_SECRET;
 const EFI_CERTIFICATE_PATH = process.env.EFI_CERTIFICATE_PATH;
 const EFI_SANDBOX = process.env.EFI_SANDBOX === 'true';
-
-// ======================= NOVA VERIFICAÇÃO =======================
-// Verifica se as variáveis de ambiente essenciais foram carregadas
-if (!EFI_CLIENT_ID || !EFI_CLIENT_SECRET || !EFI_CERTIFICATE_PATH) {
-    console.error('ERRO CRÍTICO: As variáveis de ambiente da Efi (EFI_CLIENT_ID, EFI_CLIENT_SECRET, EFI_CERTIFICATE_PATH) não foram configuradas.');
-    console.error('Verifique seu arquivo .env ou as configurações de ambiente no painel de hospedagem (Render).');
-    // Encerra a aplicação ou impede a continuação para evitar erros inesperados.
-    // Em um cenário real, você pode querer lançar um erro que impeça o servidor de iniciar.
-}
-// =================================================================
 
 // Define o ambiente (produção ou homologação/sandbox)
 const API_URL = EFI_SANDBOX ? 'https://api-pix-h.gerencianet.com.br' : 'https://api-pix.gerencianet.com.br';
@@ -36,33 +26,47 @@ try {
 } catch (error) {
     console.error('ERRO AO LER O ARQUIVO DE CERTIFICADO:', error.message);
     console.error('Verifique se o caminho em EFI_CERTIFICATE_PATH no arquivo .env está correto e o arquivo existe.');
-    agent = null; // Garante que o agent é nulo se o certificado falhar
+    // Lança o erro aqui para interromper a aplicação se o certificado for essencial.
+    process.exit(1); 
 }
 
+// Configura uma instância do Axios com o agente HTTPS
+const api = axios.create({
+    baseURL: API_URL,
+    httpsAgent: agent,
+    headers: {
+        'Content-Type': 'application/json'
+    }
+});
+
+// Variável para armazenar o token de acesso e a data de expiração
+let accessToken = null;
+let tokenExpiry = null;
 
 // Função para autenticar e obter o token de acesso
 const getAccessToken = async () => {
-    // Adicionamos uma verificação para não prosseguir se as credenciais não foram carregadas
-    if (!EFI_CLIENT_ID || !EFI_CLIENT_SECRET) {
-        throw new Error('Client ID ou Client Secret da Efi não estão definidos.');
+    // Verifica se o token ainda é válido para evitar requisições desnecessárias
+    if (accessToken && tokenExpiry && new Date() < tokenExpiry) {
+        return accessToken;
     }
 
     const credentials = Buffer.from(`${EFI_CLIENT_ID}:${EFI_CLIENT_SECRET}`).toString('base64');
     
     try {
-        const response = await axios({
-            method: 'POST',
-            url: `${API_URL}/oauth/token`,
+        const response = await api.post('/oauth/token', {
+            'grant_type': 'client_credentials'
+        }, {
             headers: {
-                'Authorization': `Basic ${credentials}`,
-                'Content-Type': 'application/json'
-            },
-            data: {
-                'grant_type': 'client_credentials'
-            },
-            httpsAgent: agent
+                'Authorization': `Basic ${credentials}`
+            }
         });
-        return response.data.access_token;
+
+        // Armazena o novo token e a data de expiração
+        accessToken = response.data.access_token;
+        // Subtrai 60 segundos do tempo de expiração para garantir que o token não expire durante a requisição
+        tokenExpiry = new Date(new Date().getTime() + (response.data.expires_in - 60) * 1000);
+
+        return accessToken;
     } catch (error) {
         console.error('Erro de autenticação com a Efi:', error.response ? error.response.data : error.message);
         throw new Error('Falha na autenticação com o provedor de pagamento.');
@@ -71,9 +75,7 @@ const getAccessToken = async () => {
 
 // Função para criar uma cobrança Pix imediata
 export const createImmediateCharge = async (txid, amount, cpf, name) => {
-    if (!agent) throw new Error('O certificado da Efi não foi carregado. A operação não pode continuar.');
-
-    const accessToken = await getAccessToken();
+    const token = await getAccessToken();
 
     const requestBody = {
         calendario: {
@@ -91,15 +93,10 @@ export const createImmediateCharge = async (txid, amount, cpf, name) => {
     };
 
     try {
-        const response = await axios({
-            method: 'PUT',
-            url: `${API_URL}/v2/cob/${txid}`,
+        const response = await api.put(`/v2/cob/${txid}`, requestBody, {
             headers: {
-                'Authorization': `Bearer ${accessToken}`,
-                'Content-Type': 'application/json'
-            },
-            data: requestBody,
-            httpsAgent: agent
+                'Authorization': `Bearer ${token}`
+            }
         });
         return response.data; // Retorna os dados da cobrança criada
     } catch (error) {
@@ -110,18 +107,13 @@ export const createImmediateCharge = async (txid, amount, cpf, name) => {
 
 // Função para gerar o QR Code da cobrança
 export const generateQrCode = async (locationId) => {
-    if (!agent) throw new Error('O certificado da Efi não foi carregado. A operação não pode continuar.');
-
-    const accessToken = await getAccessToken();
+    const token = await getAccessToken();
 
     try {
-        const response = await axios({
-            method: 'GET',
-            url: `${API_URL}/v2/loc/${locationId}/qrcode`,
+        const response = await api.get(`/v2/loc/${locationId}/qrcode`, {
             headers: {
-                'Authorization': `Bearer ${accessToken}`
-            },
-            httpsAgent: agent
+                'Authorization': `Bearer ${token}`
+            }
         });
         return response.data; // Retorna { qrcode, imagemQrcode }
     } catch (error) {
