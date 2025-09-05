@@ -1,86 +1,75 @@
-// Arquivo: src/efiPay.js (VERSÃO FINAL COM A CORREÇÃO DA CHAMADA DE FUNÇÃO)
-
+// src/efiPay.js
 import EfiPay from 'sdk-node-apis-efi';
 import path from 'path';
 import fs from 'fs';
 
-// Carrega as credenciais do .env
-const EFI_CLIENT_ID = process.env.EFI_CLIENT_ID;
-const EFI_CLIENT_SECRET = process.env.EFI_CLIENT_SECRET;
-const EFI_CERTIFICATE_PATH = process.env.EFI_CERTIFICATE_PATH;
-const EFI_SANDBOX = process.env.EFI_SANDBOX === 'true';
+// Variáveis de ambiente
+const {
+  EFI_CLIENT_ID,
+  EFI_CLIENT_SECRET,
+  EFI_CERTIFICATE_PATH,
+  EFI_SANDBOX,
+  CHAVE_PIX,
+} = process.env;
 
-// Garante que o caminho do certificado seja absoluto
-const certPath = path.resolve(EFI_CERTIFICATE_PATH);
-
-// Verifica se o arquivo do certificado existe
-if (!fs.existsSync(certPath)) {
-    console.error('ERRO: Arquivo de certificado não encontrado no caminho:', certPath);
-    process.exit(1);
+// Validações básicas
+if (!EFI_CLIENT_ID || !EFI_CLIENT_SECRET || !EFI_CERTIFICATE_PATH || !CHAVE_PIX) {
+  throw new Error(
+    'Variáveis de ambiente da Efí ausentes: verifique EFI_CLIENT_ID, EFI_CLIENT_SECRET, EFI_CERTIFICATE_PATH e CHAVE_PIX.'
+  );
 }
 
-// Configuração do SDK da Efi
-const options = {
+// Garante caminho absoluto do certificado e existência do arquivo
+const certPath = path.resolve(EFI_CERTIFICATE_PATH);
+if (!fs.existsSync(certPath)) {
+  console.error('ERRO: Arquivo de certificado não encontrado:', certPath);
+  process.exit(1);
+}
+
+// Instancia o SDK
+const efipay = new EfiPay({
   client_id: EFI_CLIENT_ID,
   client_secret: EFI_CLIENT_SECRET,
   certificate: certPath,
-  sandbox: EFI_SANDBOX,
-  timeout: 30000
-};
+  sandbox: String(EFI_SANDBOX).toLowerCase() === 'true',
+  timeout: 30000,
+});
 
-let efiPay;
-try {
-  efiPay = new EfiPay(options);
-  console.log('SDK da Efí (novo) inicializado com sucesso.');
-} catch (error) {
-  console.error('ERRO AO INICIALIZAR O SDK DA EFÍ:', error.message);
-  throw new Error('Falha na configuração do SDK de pagamento.');
+console.log('SDK da Efí inicializado com sucesso.');
+
+// Cria cobrança imediata Pix
+export async function createImmediateCharge(txid, amount, cpf, name) {
+  const body = {
+    calendario: { expiracao: 3600 },
+    devedor: { cpf: String(cpf).replace(/\D/g, ''), nome: name || 'Cliente' },
+    valor: { original: Number(amount).toFixed(2) },
+    chave: CHAVE_PIX,
+    solicitacaoPagador: 'Depósito em plataforma',
+  };
+
+  const params = { txid };
+
+  try {
+    // ✅ correção: método é de nível superior (não use efipay.pix.*)
+    const response = await efipay.pixCreateImmediateCharge(params, body);
+    return response;
+  } catch (err) {
+    console.error('--- ERRO DETALHADO AO CRIAR COBRANÇA NA EFÍ ---');
+    console.error(err?.response?.data ?? err?.data ?? err);
+    throw new Error('Falha ao criar a cobrança Pix.');
+  }
 }
 
-// Função para criar uma cobrança Pix imediata
-export const createImmediateCharge = async (txid, amount, cpf, name) => {
-    const body = {
-        calendario: { expiracao: 3600 },
-        devedor: { cpf: cpf.replace(/\D/g, ''), nome: name },
-        valor: { original: amount.toFixed(2).toString() },
-        chave: process.env.CHAVE_PIX,
-        solicitacaoPagador: 'Depósito em plataforma'
-    };
-    
-    const params = { txid };
-
-    try {
-        // CORREÇÃO: Removido o ".pix" da chamada da função
-        const chargeResponse = await efiPay.pixCreateImmediateCharge(params, body);
-        return chargeResponse;
-    } catch (error) {
-        console.error('--- ERRO DETALHADO AO CRIAR COBRANÇA NA EFÍ ---');
-        if (error.data) {
-            console.error(error.data);
-        } else {
-            console.error(error);
-        }
-        throw new Error('Falha ao criar a cobrança Pix.');
-    }
-};
-
-// Função para gerar o QR Code da cobrança
-export const generateQrCode = async (locationId) => {
-    const params = {
-        id: locationId
-    };
-
-    try {
-        // CORREÇÃO: Removido o ".pix" da chamada da função
-        const qrCodeResponse = await efiPay.pixGenerateQRCode(params);
-        return qrCodeResponse;
-    } catch (error) {
-        console.error('--- ERRO DETALHADO AO GERAR QR CODE NA EFÍ ---');
-        if (error.data) {
-            console.error(error.data);
-        } else {
-            console.error(error);
-        }
-        throw new Error('Falha ao gerar o QR Code.');
-    }
-};
+// Gera QR Code da cobrança
+export async function generateQrCode(locationId) {
+  const params = { id: locationId };
+  try {
+    // ✅ correção: método é de nível superior
+    const response = await efipay.pixGenerateQRCode(params);
+    return response;
+  } catch (err) {
+    console.error('--- ERRO DETALHADO AO GERAR QR CODE NA EFÍ ---');
+    console.error(err?.response?.data ?? err?.data ?? err);
+    throw new Error('Falha ao gerar o QR Code.');
+  }
+}
