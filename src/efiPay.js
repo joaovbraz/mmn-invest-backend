@@ -1,7 +1,12 @@
 // src/efiPay.js
 // Integração Efí PIX via HTTP/2 + mTLS (P12)
-// - Sem axios; usa http2 nativo do Node
-// - Exports: createImmediateCharge, generateQrCode, __debugOAuth
+// Exports principais:
+// - getAccessToken (interno), __debugOAuth()
+// - createImmediateCharge({ txid, amount, cpf, name })
+// - generateQrCode({ locId })
+// - setWebhookForKey({ key, url })
+// - getWebhookForKey({ key })
+// - getChargeByTxid({ txid })
 
 import fs from 'fs';
 import path from 'path';
@@ -17,7 +22,6 @@ const {
   CHAVE_PIX,
 } = process.env;
 
-// ==== validações básicas ====
 if (!EFI_CLIENT_ID || !EFI_CLIENT_SECRET) {
   throw new Error('Variáveis ausentes: EFI_CLIENT_ID e/ou EFI_CLIENT_SECRET.');
 }
@@ -35,7 +39,7 @@ const BASE_URL =
 
 const { hostname } = new URL(BASE_URL);
 
-// ---- carrega o .p12 como Buffer
+// --- carrega o .p12
 function loadP12Buffer() {
   if (EFI_CERTIFICATE_BASE64 && EFI_CERTIFICATE_BASE64.trim()) {
     return Buffer.from(EFI_CERTIFICATE_BASE64.trim(), 'base64');
@@ -48,7 +52,7 @@ function loadP12Buffer() {
 }
 const pfx = loadP12Buffer();
 
-// ---- helper de request HTTP/2 com mTLS
+// --- helper http2
 function h2Request({ method, path: reqPath, headers = {}, body = null, timeoutMs = 20000, label = '' }) {
   return new Promise((resolve, reject) => {
     const client = http2.connect(BASE_URL, {
@@ -118,7 +122,7 @@ function basicAuthHeader(id, secret) {
   return 'Basic ' + Buffer.from(`${id}:${secret}`).toString('base64');
 }
 
-// ===================== OAuth (HTTP/2 + mTLS) =====================
+// ===================== OAuth =====================
 async function getAccessToken() {
   const body = new URLSearchParams({
     grant_type: 'client_credentials',
@@ -150,7 +154,6 @@ async function getAccessToken() {
   }
 }
 
-// ==== Export de debug para o /debug/efi-oauth ====
 export async function __debugOAuth() {
   return getAccessToken();
 }
@@ -181,7 +184,7 @@ export async function createImmediateCharge({ txid, amount, cpf, name }) {
       body: payload,
       label: 'PUT /v2/cob/{txid}',
     });
-    return res.data; // deve conter .loc.id
+    return res.data; // .loc.id
   } catch (err) {
     console.error('--- ERRO AO CRIAR COBRANÇA (HTTP/2) NA EFÍ ---', { status: err?.status, data: err?.data });
     throw new Error('Falha ao criar a cobrança Pix.');
@@ -206,5 +209,74 @@ export async function generateQrCode({ locId }) {
   } catch (err) {
     console.error('--- ERRO AO GERAR QR CODE (HTTP/2) NA EFÍ ---', { status: err?.status, data: err?.data });
     throw new Error('Falha ao gerar o QR Code.');
+  }
+}
+
+// ===================== Webhook da chave Pix =====================
+export async function setWebhookForKey({ key, url }) {
+  const token = await getAccessToken();
+  const body = JSON.stringify({ webhookUrl: url });
+
+  try {
+    const res = await h2Request({
+      method: 'PUT',
+      path: `/v2/webhook/${encodeURIComponent(key)}`,
+      headers: {
+        'content-type': 'application/json',
+        'accept': 'application/json',
+        'authorization': `Bearer ${token}`,
+        'content-length': Buffer.byteLength(body).toString(),
+        'host': hostname,
+      },
+      body,
+      label: 'PUT /v2/webhook/{chave}',
+    });
+    return res.data;
+  } catch (err) {
+    console.error('--- ERRO AO REGISTRAR WEBHOOK NA EFÍ ---', { status: err?.status, data: err?.data });
+    throw new Error('Falha ao registrar webhook na Efí.');
+  }
+}
+
+export async function getWebhookForKey({ key }) {
+  const token = await getAccessToken();
+  try {
+    const res = await h2Request({
+      method: 'GET',
+      path: `/v2/webhook/${encodeURIComponent(key)}`,
+      headers: {
+        'accept': 'application/json',
+        'authorization': `Bearer ${token}`,
+        'host': hostname,
+      },
+      label: 'GET /v2/webhook/{chave}',
+    });
+    return res.data; // { webhookUrl: ... }
+  } catch (err) {
+    // alguns ambientes podem não ter GET; tratamos como não configurado
+    if (err?.status === 404) return null;
+    console.error('--- ERRO AO LER WEBHOOK NA EFÍ ---', { status: err?.status, data: err?.data });
+    throw new Error('Falha ao consultar webhook na Efí.');
+  }
+}
+
+// ===================== Consulta de cobrança por txid =====================
+export async function getChargeByTxid({ txid }) {
+  const token = await getAccessToken();
+  try {
+    const res = await h2Request({
+      method: 'GET',
+      path: `/v2/cob/${encodeURIComponent(txid)}`,
+      headers: {
+        'accept': 'application/json',
+        'authorization': `Bearer ${token}`,
+        'host': hostname,
+      },
+      label: 'GET /v2/cob/{txid}',
+    });
+    return res.data; // status da cobrança
+  } catch (err) {
+    console.error('--- ERRO AO CONSULTAR COBRANÇA NA EFÍ ---', { status: err?.status, data: err?.data });
+    throw new Error('Falha ao consultar cobrança na Efí.');
   }
 }

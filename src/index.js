@@ -8,12 +8,24 @@ import crypto from 'crypto';
 
 import { protect, admin } from './authMiddleware.js';
 import { processDailyYields } from './jobs/yieldProcessor.js';
-import { createImmediateCharge, generateQrCode, __debugOAuth } from './efiPay.js';
+import {
+  createImmediateCharge,
+  generateQrCode,
+  __debugOAuth,
+  setWebhookForKey,
+  getWebhookForKey,
+  getChargeByTxid,
+} from './efiPay.js';
 
 const app = express();
 const prisma = new PrismaClient();
 const saltRounds = 10;
 
+// ====== Config ======
+const PUBLIC_URL = process.env.PUBLIC_URL?.replace(/\/+$/, '') || '';
+const DEBUG_SECRET = process.env.DEBUG_SECRET || '';
+
+// ====== Ranks ======
 const rankThresholds = {
   Lendário: 10000,
   Diamante: 5000,
@@ -22,12 +34,13 @@ const rankThresholds = {
   Prata: 300,
   Bronze: 0,
 };
+const rankKeys = Object.keys(rankThresholds).sort((a, b) => rankThresholds[b] - rankThresholds[a]);
 
-// ---------- middlewares base ----------
+// ====== Middlewares ======
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
 
-// Logger simples para ver se a requisição chega e se traz Authorization
+// log básico para depósitos
 app.use((req, _res, next) => {
   if (req.path.startsWith('/depositos')) {
     console.log(`[REQ] ${req.method} ${req.path}`, {
@@ -39,11 +52,11 @@ app.use((req, _res, next) => {
 
 app.get('/', (_req, res) => res.json({ message: 'API do TDP INVEST funcionando!' }));
 
-// ---------- rota de debug do OAuth (proteja com DEBUG_SECRET) ----------
+// ====== DEBUG OAuth ======
 app.get('/debug/efi-oauth', async (req, res) => {
   try {
     const secret = req.query.secret || req.headers['x-debug-secret'];
-    if (!process.env.DEBUG_SECRET || secret !== process.env.DEBUG_SECRET) {
+    if (!DEBUG_SECRET || secret !== DEBUG_SECRET) {
       return res.status(403).json({ ok: false, error: 'forbidden' });
     }
     const token = await __debugOAuth();
@@ -54,11 +67,7 @@ app.get('/debug/efi-oauth', async (req, res) => {
   }
 });
 
-// ---------- helpers ----------
-const rankKeys = Object.keys(rankThresholds).sort(
-  (a, b) => rankThresholds[b] - rankThresholds[a]
-);
-
+// ====== Helpers ======
 async function updateUserRankByTotalInvestment(userId) {
   try {
     const invs = await prisma.investment.findMany({
@@ -68,10 +77,7 @@ async function updateUserRankByTotalInvestment(userId) {
     const total = invs.reduce((s, i) => s + i.plan.price, 0);
     let newRank = 'Bronze';
     for (const k of rankKeys) {
-      if (total >= rankThresholds[k]) {
-        newRank = k;
-        break;
-      }
+      if (total >= rankThresholds[k]) { newRank = k; break; }
     }
     await prisma.user.update({ where: { id: userId }, data: { rank: newRank } });
   } catch (e) {
@@ -79,7 +85,7 @@ async function updateUserRankByTotalInvestment(userId) {
   }
 }
 
-// ---------- auth ----------
+// ====== Auth ======
 app.post('/criar-usuario', async (req, res) => {
   const { email, name, password, referrerCode } = req.body;
   if (!email || !name || !password) {
@@ -137,7 +143,7 @@ app.post('/login', async (req, res) => {
   }
 });
 
-// ---------- dados do usuário ----------
+// ====== Dados do usuário ======
 app.get('/meus-dados', protect, async (req, res) => {
   try {
     const userId = req.user.id;
@@ -170,7 +176,7 @@ app.put('/meus-dados', protect, async (req, res) => {
   }
 });
 
-// ---------- DEPÓSITO PIX ----------
+// ====== Depósito PIX ======
 app.post('/depositos/pix', protect, async (req, res) => {
   const userId = req.user.id;
   const { amount, cpf } = req.body;
@@ -213,6 +219,7 @@ app.post('/depositos/pix', protect, async (req, res) => {
     });
 
     return res.status(201).json({
+      txid,
       qrCode: qr.qrcode,
       qrCodeImage: qr.imagemQrcode,
     });
@@ -222,7 +229,78 @@ app.post('/depositos/pix', protect, async (req, res) => {
   }
 });
 
-// ---------- Webhook Pix ----------
+// ---- consulta simples de status (para fallback/polling)
+app.get('/depositos/status/:txid', protect, async (req, res) => {
+  const { txid } = req.params;
+  try {
+    const dep = await prisma.pixDeposit.findUnique({ where: { txid } });
+    if (!dep || dep.userId !== req.user.id) return res.status(404).json({ error: 'Depósito não encontrado.' });
+    return res.json({ status: dep.status, amount: dep.amount, txid: dep.txid });
+  } catch (e) {
+    console.error('[status depósito] erro:', e);
+    return res.status(500).json({ error: 'Falha ao consultar status.' });
+  }
+});
+
+// ====== SSE: stream de confirmação ======
+const sseClients = new Map(); // txid -> Set(res)
+
+function sseSend(res, event, data) {
+  res.write(`event: ${event}\n`);
+  res.write(`data: ${JSON.stringify(data)}\n\n`);
+}
+
+function notifySse(txid, payload) {
+  const set = sseClients.get(txid);
+  if (!set) return;
+  for (const res of set) {
+    try { sseSend(res, 'update', payload); } catch {}
+    try { res.end(); } catch {}
+  }
+  sseClients.delete(txid);
+}
+
+app.get('/depositos/stream/:txid', protect, async (req, res) => {
+  const { txid } = req.params;
+
+  // headers SSE
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+
+  // envia status inicial
+  try {
+    const dep = await prisma.pixDeposit.findUnique({ where: { txid } });
+    if (!dep || dep.userId !== req.user.id) {
+      sseSend(res, 'error', { message: 'Depósito não encontrado.' });
+      return res.end();
+    }
+    sseSend(res, 'update', { status: dep.status, amount: dep.amount, txid: dep.txid });
+    if (dep.status === 'COMPLETED') return res.end();
+  } catch (e) {
+    sseSend(res, 'error', { message: 'Erro ao carregar depósito.' });
+    return res.end();
+  }
+
+  // registra cliente
+  if (!sseClients.has(txid)) sseClients.set(txid, new Set());
+  sseClients.get(txid).add(res);
+
+  // ping/keepalive
+  const ping = setInterval(() => res.write(': ping\n\n'), 20000);
+
+  req.on('close', () => {
+    clearInterval(ping);
+    const set = sseClients.get(txid);
+    if (set) {
+      set.delete(res);
+      if (!set.size) sseClients.delete(txid);
+    }
+  });
+});
+
+// ====== Webhook Pix (Efí -> nossa API) ======
 app.post('/webhooks/pix', async (req, res) => {
   console.log('Webhook PIX recebido!');
   const pixData = req.body.pix;
@@ -255,6 +333,10 @@ app.post('/webhooks/pix', async (req, res) => {
           },
         });
       });
+
+      // avisa os clientes conectados ao SSE
+      notifySse(txid, { status: 'COMPLETED', txid });
+
     } catch (e) {
       console.error(`Erro ao processar webhook txid ${txid}:`, e);
     }
@@ -263,7 +345,27 @@ app.post('/webhooks/pix', async (req, res) => {
   return res.status(200).send('OK');
 });
 
-// ---------- CRON ----------
+// ====== Utilitário: registrar webhook na Efí ======
+app.post('/efi/webhook/register', async (req, res) => {
+  try {
+    const secret = req.query.secret || req.headers['x-debug-secret'];
+    if (!DEBUG_SECRET || secret !== DEBUG_SECRET) {
+      return res.status(403).json({ ok: false, error: 'forbidden' });
+    }
+    if (!PUBLIC_URL) {
+      return res.status(400).json({ ok: false, error: 'Defina PUBLIC_URL no ambiente.' });
+    }
+    const url = `${PUBLIC_URL}/webhooks/pix`;
+    const put = await setWebhookForKey({ key: process.env.CHAVE_PIX, url });
+    let got = null;
+    try { got = await getWebhookForKey({ key: process.env.CHAVE_PIX }); } catch {}
+    return res.json({ ok: true, setTo: url, providerResponse: put, current: got });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e?.message || 'erro' });
+  }
+});
+
+// ====== CRON ======
 app.post('/processar-rendimentos', (req, res) => {
   const { secret } = req.body;
   if (secret !== process.env.CRON_SECRET) {
@@ -273,7 +375,7 @@ app.post('/processar-rendimentos', (req, res) => {
   processDailyYields();
 });
 
-// ---------- ERROR HANDLER GLOBAL ----------
+// ====== ERROR HANDLER ======
 app.use((err, req, res, next) => {
   console.error('[UNHANDLED ERROR]', err);
   res.status(500).json({ error: 'Erro interno.' });
