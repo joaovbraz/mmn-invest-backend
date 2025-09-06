@@ -1,6 +1,6 @@
-// src/index.js (Versão Revisada e Melhorada)
+// src/index.js (Versão Final 100% Completa com CORS e Novas Rotas)
 import express from 'express';
-import { PrismaClient, Prisma } from '@prisma/client'; // Importado Prisma para Decimal
+import { PrismaClient, Prisma } from '@prisma/client';
 import cors from 'cors';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
@@ -16,7 +16,6 @@ const saltRounds = 10;
 
 // ======================= HELPERS =======================
 
-// Função auxiliar para atualizar o rank de um usuário
 async function updateUserRankByTotalInvestment(userId) {
   try {
     const investments = await prisma.investment.findMany({
@@ -25,7 +24,7 @@ async function updateUserRankByTotalInvestment(userId) {
     });
 
     const totalInvested = investments.reduce(
-      (sum, investment) => sum + investment.plan.price.toNumber(), // Usando .toNumber() para somar
+      (sum, investment) => sum + investment.plan.price.toNumber(),
       0
     );
 
@@ -44,7 +43,14 @@ async function updateUserRankByTotalInvestment(userId) {
 
 // ======================= MIDDLEWARE & SETUP =======================
 
-app.use(cors());
+// ✅ MUDANÇA CRÍTICA: Configuração do CORS
+const corsOptions = {
+  origin: process.env.FRONTEND_URL || 'https://tdp-invest-frontend.vercel.app', 
+  credentials: true, // Permite que o navegador envie cookies
+};
+app.use(cors(corsOptions));
+// ✅ FIM DA MUDANÇA
+
 app.use(express.json());
 
 app.get('/', (_req, res) => res.json({ message: 'API do TDP INVEST funcionando!' }));
@@ -262,14 +268,13 @@ app.post('/webhooks/pix', async (req, res) => {
   res.status(200).send('OK');
 });
 
-// ✅ NOVO: Rota para o frontend verificar o status de um depósito (Polling)
 app.get('/depositos/status/:txid', protect, async (req, res) => {
     try {
         const { txid } = req.params;
         const deposit = await prisma.pixDeposit.findFirst({
             where: {
                 txid: txid,
-                userId: req.user.id, // Garante que o usuário só pode consultar seus próprios depósitos
+                userId: req.user.id,
             },
             select: {
                 status: true,
@@ -383,8 +388,73 @@ app.post('/investimentos/comprar', protect, async (req, res) => {
   }
 });
 
-// ======================= ROTA DE CRON JOB =======================
 
+app.get('/minhas-cotas-ativas', protect, async (req, res) => {
+  try {
+    const investments = await prisma.investment.findMany({
+      where: { userId: req.user.id, status: 'ACTIVE' },
+      include: { plan: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    // Convertendo Decimals para numbers antes de enviar
+    const safeInvestments = investments.map(inv => ({
+        ...inv,
+        plan: {
+            ...inv.plan,
+            price: inv.plan.price.toNumber(),
+            dailyYield: inv.plan.dailyYield.toNumber(),
+        }
+    }));
+    res.status(200).json(safeInvestments);
+  } catch (error) {
+    res.status(500).json({ error: 'Erro ao buscar cotas ativas.' });
+  }
+});
+
+app.get('/minhas-cotas-finalizadas', protect, async (req, res) => {
+  try {
+    const investments = await prisma.investment.findMany({
+      where: { userId: req.user.id, status: 'COMPLETED' },
+      include: { plan: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    // Convertendo Decimals para numbers antes de enviar
+    const safeInvestments = investments.map(inv => ({
+        ...inv,
+        plan: {
+            ...inv.plan,
+            price: inv.plan.price.toNumber(),
+            dailyYield: inv.plan.dailyYield.toNumber(),
+        }
+    }));
+    res.status(200).json(safeInvestments);
+  } catch (error) {
+    res.status(500).json({ error: 'Erro ao buscar cotas finalizadas.' });
+  }
+});
+
+app.get('/meu-extrato', protect, async (req, res) => {
+    try {
+        const wallet = await prisma.wallet.findUnique({ where: { userId: req.user.id }});
+        if (!wallet) return res.status(404).json({ error: 'Carteira não encontrada.' });
+
+        const transactions = await prisma.transaction.findMany({
+            where: { walletId: wallet.id },
+            orderBy: { createdAt: 'desc' },
+        });
+        // Convertendo Decimals para numbers antes de enviar
+        const safeTransactions = transactions.map(t => ({
+            ...t,
+            amount: t.amount.toNumber(),
+        }));
+        res.status(200).json(safeTransactions);
+    } catch (error) {
+        res.status(500).json({ error: 'Erro ao buscar extrato.' });
+    }
+});
+
+
+// ======================= ROTA DE CRON JOB =======================
 app.post('/processar-rendimentos', admin, async (req, res) => {
   try {
     processDailyYields(); 
@@ -396,6 +466,5 @@ app.post('/processar-rendimentos', admin, async (req, res) => {
 });
 
 // ======================= START DO SERVIDOR =======================
-
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log(`🚀 Servidor rodando na porta ${PORT}`));
