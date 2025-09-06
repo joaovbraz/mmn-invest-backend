@@ -1,4 +1,4 @@
-// prisma/schema.prisma
+// prisma/schema.prisma (Versão Revisada e Melhorada)
 generator client {
   provider = "prisma-client-js"
 }
@@ -8,90 +8,111 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Enums para garantir consistência de dados
 enum TransactionType {
   DEPOSIT
   WITHDRAW
   YIELD
   PURCHASE
+  COMMISSION // Bônus: Adicionado tipo para comissões de referência
 }
 
 enum PixDepositStatus {
   PENDING
   COMPLETED
+  ERROR
+}
+
+enum InvestmentStatus {
+  ACTIVE
+  COMPLETED
 }
 
 model User {
-  id            Int           @id @default(autoincrement())
-  email         String        @unique
-  name          String
-  password      String
-  role          String        @default("USER")
-  phone         String?
-  referralCode  String        @unique
-  referrerId    Int?
-  referees      User[]        @relation("Referrals")
-  referrer      User?         @relation("Referrals", fields: [referrerId], references: [id])
-  careerPoints  Int           @default(0)
-  rank          String        @default("Bronze")
-  createdAt     DateTime      @default(now())
+  id           Int          @id @default(autoincrement())
+  email        String       @unique
+  name         String
+  password     String
+  role         String       @default("USER")
+  phone        String?
+  referralCode String       @unique
+  referrerId   Int?
+  referees     User[]       @relation("Referrals")
+  referrer     User?        @relation("Referrals", fields: [referrerId], references: [id])
+  careerPoints Int          @default(0)
+  rank         String       @default("Bronze")
+  createdAt    DateTime     @default(now())
 
-  wallet        Wallet?
-  investments   Investment[]
-  pixDeposits   PixDeposit[]
+  wallet       Wallet?
+  investments  Investment[]
+  pixDeposits  PixDeposit[]
 }
 
 model Wallet {
-  id           Int           @id @default(autoincrement())
-  userId       Int           @unique
-  balance      Float         @default(0)
-  createdAt    DateTime      @default(now())
+  id        Int      @id @default(autoincrement())
+  userId    Int      @unique
+  // ✅ CORRIGIDO: Usando Decimal para precisão financeira
+  balance   Decimal  @default(0)
+  createdAt DateTime @default(now())
 
-  user         User          @relation(fields: [userId], references: [id])
+  // ✅ MELHORADO: Adicionado onDelete: Cascade para limpar o banco
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   transactions Transaction[]
 }
 
 model Transaction {
   id          Int             @id @default(autoincrement())
   walletId    Int
-  amount      Float
+  // ✅ CORRIGIDO: Usando Decimal para precisão financeira
+  amount      Decimal
   type        TransactionType
   description String?
   createdAt   DateTime        @default(now())
 
-  wallet      Wallet          @relation(fields: [walletId], references: [id])
+  // ✅ MELHORADO: Adicionado onDelete: Cascade
+  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
 }
 
 model Plan {
-  id         Int       @id @default(autoincrement())
-  name       String
-  price      Float
-  dailyYield Float
-  active     Boolean   @default(true)
+  id               Int        @id @default(autoincrement())
+  name             String
+  // ✅ CORRIGIDO: Usando Decimal para precisão financeira
+  price            Decimal
+  // ✅ MELHORADO: Nome mais claro para o rendimento
+  dailyYield       Decimal
+  durationDays     Int // Bônus: Adicionada a duração do plano
+  active           Boolean    @default(true)
 
   investments Investment[]
 }
 
 model Investment {
-  id        Int       @id @default(autoincrement())
+  id        Int      @id @default(autoincrement())
   userId    Int
   planId    Int
-  status    String    @default("ACTIVE")
-  createdAt DateTime  @default(now())
+  // ✅ MELHORADO: Usando Enum para garantir status válidos
+  status    InvestmentStatus @default(ACTIVE)
+  createdAt DateTime @default(now())
+  expiresAt DateTime // Bônus: Adicionado campo para saber quando o plano expira
 
-  user      User      @relation(fields: [userId], references: [id])
-  plan      Plan      @relation(fields: [planId], references: [id])
+  // ✅ MELHORADO: Adicionado onDelete: Cascade
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan Plan @relation(fields: [planId], references: [id])
 }
 
 model PixDeposit {
   id            Int              @id @default(autoincrement())
   userId        Int
-  amount        Float
+  // ✅ CORRIGIDO: Usando Decimal para precisão financeira
+  amount        Decimal
   txid          String           @unique
   status        PixDepositStatus @default(PENDING)
-  efilocId      Int?
+  // ✅ CORRIGIDO: Usando String para o ID externo
+  efilocId      String?
   payloadQrCode String?
   imagemQrcode  String?
   createdAt     DateTime         @default(now())
 
-  user          User             @relation(fields: [userId], references: [id])
+  // ✅ MELHORADO: Adicionado onDelete: Cascade
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
