@@ -48,6 +48,12 @@ const corsOptions = {
   origin: process.env.FRONTEND_URL || 'https://tdp-invest-frontend.vercel.app', 
   credentials: true, // Permite que o navegador envie cookies e tokens de autenticação
 };
+
+// ======================= ALTERAÇÃO FEITA AQUI =======================
+// Adicionando o "marcador" para verificar a configuração no log
+console.log(`[CORS CONFIG] Servidor configurado para aceitar origem: ${corsOptions.origin}`);
+// ===================================================================
+
 app.use(cors(corsOptions));
 
 
