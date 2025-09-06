@@ -43,13 +43,13 @@ async function updateUserRankByTotalInvestment(userId) {
 
 // ======================= MIDDLEWARE & SETUP =======================
 
-// ✅ CORREÇÃO CRÍTICA: Configuração do CORS para permitir cookies
+// Configuração do CORS para permitir o frontend se comunicar com o backend
 const corsOptions = {
   origin: process.env.FRONTEND_URL || 'https://tdp-invest-frontend.vercel.app', 
-  credentials: true, // Permite que o navegador envie cookies
+  credentials: true, // Permite que o navegador envie cookies e tokens de autenticação
 };
 app.use(cors(corsOptions));
-// ✅ FIM DA CORREÇÃO
+
 
 app.use(express.json());
 
@@ -143,6 +143,7 @@ app.post('/login', async (req, res) => {
   }
 });
 
+// ... (o resto do seu código permanece exatamente igual)
 // ======================= PERFIL & DADOS =======================
 
 app.get('/meus-dados', protect, async (req, res) => {
