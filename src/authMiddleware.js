@@ -1,53 +1,60 @@
 // src/authMiddleware.js
 import jwt from 'jsonwebtoken';
 
-/**
- * Extrai token do request:
- * - Authorization: Bearer <token>
- * - query string (?token=<token>)  -> útil para SSE/EventSource
- * - cookie "authToken"
- * - header "x-access-token"
- */
+/* --- util: extrai token de vários lugares --- */
 function extractToken(req) {
-  // Authorization
+  // 1) Authorization: Bearer xxx
   const auth = req.headers?.authorization || '';
   if (auth.toLowerCase().startsWith('bearer ')) {
-    return auth.slice(7).trim();
+    const t = auth.slice(7).trim();
+    if (t) return t;
   }
 
-  // ?token=
-  if (req.query && typeof req.query.token === 'string' && req.query.token.length > 0) {
+  // 2) Query string (?token=)
+  if (req.query && typeof req.query.token === 'string' && req.query.token) {
     return req.query.token;
   }
 
-  // Cookie
+  // 3) Cookies
   const cookieHeader = req.headers?.cookie || '';
-  if (cookieHeader.includes('authToken=')) {
-    try {
-      const pair = cookieHeader
+  if (cookieHeader) {
+    const map = Object.fromEntries(
+      cookieHeader
         .split(';')
         .map(s => s.trim())
-        .find(s => s.startsWith('authToken='));
-      if (pair) {
-        return decodeURIComponent(pair.split('=')[1]);
-      }
-    } catch {
-      // ignore
-    }
+        .filter(Boolean)
+        .map(pair => {
+          const idx = pair.indexOf('=');
+          const k = pair.slice(0, idx);
+          const v = decodeURIComponent(pair.slice(idx + 1));
+          return [k, v];
+        })
+    );
+    const cookieToken =
+      map.authToken || map.token || map.jwt || map.access_token;
+    if (cookieToken) return cookieToken;
   }
 
-  // x-access-token
+  // 4) x-access-token
   const alt = req.headers['x-access-token'];
-  if (typeof alt === 'string' && alt.length > 0) {
-    return alt;
-  }
+  if (typeof alt === 'string' && alt) return alt;
 
   return null;
 }
 
-/**
- * Valida o JWT e popula req.user.
- */
+/* --- seta req.user e req.userId --- */
+function setUserOnReq(req, payload) {
+  const id = payload.userId ?? payload.id ?? payload.sub ?? null;
+  req.userId = id || null;
+  req.user = {
+    id,
+    email: payload.email ?? null,
+    role: payload.role ?? 'user',
+    raw: payload,
+  };
+}
+
+/* --- middleware: precisa estar autenticado --- */
 export function authenticate(req, res, next) {
   try {
     const token = extractToken(req);
@@ -62,18 +69,11 @@ export function authenticate(req, res, next) {
     }
 
     const payload = jwt.verify(token, secret);
+    setUserOnReq(req, payload);
 
-    const userId = payload.userId ?? payload.id ?? payload.sub;
-    if (!userId) {
+    if (!req.userId) {
       return res.status(401).json({ ok: false, error: 'invalid_token_payload' });
     }
-
-    req.user = {
-      id: userId,
-      email: payload.email ?? null,
-      role: payload.role ?? 'user',
-      raw: payload,
-    };
 
     return next();
   } catch (err) {
@@ -82,9 +82,7 @@ export function authenticate(req, res, next) {
   }
 }
 
-/**
- * Opcional: se houver token válido, seta req.user; senão segue.
- */
+/* --- middleware: autenticação opcional --- */
 export function authenticateOptional(req, _res, next) {
   try {
     const token = extractToken(req);
@@ -94,43 +92,31 @@ export function authenticateOptional(req, _res, next) {
     if (!secret) return next();
 
     const payload = jwt.verify(token, secret);
-    req.user = {
-      id: payload.userId ?? payload.id ?? payload.sub,
-      email: payload.email ?? null,
-      role: payload.role ?? 'user',
-      raw: payload,
-    };
+    setUserOnReq(req, payload);
     return next();
   } catch {
     return next();
   }
 }
 
-/**
- * Checagem de admin. Pressupõe que protect/autenticate já rodou antes.
- * Se preferir usar isolado, ele tenta autenticar também.
- */
+/* --- middleware: exige perfil admin --- */
 export function admin(req, res, next) {
+  const proceed = () => {
+    if (!req.user || (req.user.role ?? 'user') !== 'admin') {
+      return res.status(403).json({ ok: false, error: 'forbidden' });
+    }
+    return next();
+  };
+
   if (!req.user) {
-    // tenta autenticar se alguém usar admin isolado
-    return authenticate(req, res, function afterAuth(err) {
+    return authenticate(req, res, (err) => {
       if (err) return next(err);
-      if (!req.user) return res.status(401).json({ ok: false, error: 'unauthorized' });
-      if ((req.user.role ?? 'user') !== 'admin') {
-        return res.status(403).json({ ok: false, error: 'forbidden' });
-      }
-      return next();
+      return proceed();
     });
   }
-
-  if ((req.user.role ?? 'user') !== 'admin') {
-    return res.status(403).json({ ok: false, error: 'forbidden' });
-  }
-  return next();
+  return proceed();
 }
 
-/** Compat com seu código antigo */
+/* compat com seu código antigo */
 export const protect = authenticate;
-
-/** default export opcional */
 export default authenticate;
