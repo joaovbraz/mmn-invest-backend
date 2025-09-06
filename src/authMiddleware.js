@@ -1,123 +1,75 @@
 // src/authMiddleware.js
 import jwt from 'jsonwebtoken';
 
-/** Extrai o token de vários lugares: Authorization, query, cookies e header alternativo */
+/**
+ * Extrai o token do header Authorization (Bearer),
+ * ou dos cookies (token/jwt/access_token), com ou sem cookie-parser.
+ */
 function extractToken(req) {
-  // Authorization: Bearer <token>
-  const auth = req.headers?.authorization || '';
-  if (auth.toLowerCase().startsWith('bearer ')) {
-    const t = auth.slice(7).trim();
-    if (t) return t;
+  // 1) Authorization: Bearer <token>
+  const auth = req.headers?.authorization || req.headers?.Authorization;
+  if (auth && auth.startsWith('Bearer ')) {
+    return auth.split(' ')[1];
   }
 
-  // ?token=<token>
-  if (req.query && typeof req.query.token === 'string' && req.query.token) {
-    return req.query.token;
+  // 2) Cookie via cookie-parser (se estiver instalado/usado)
+  const cookieViaParser =
+    req.cookies?.token || req.cookies?.jwt || req.cookies?.access_token;
+  if (cookieViaParser) return cookieViaParser;
+
+  // 3) Header "cookie" bruto (sem cookie-parser)
+  const raw = req.headers?.cookie;
+  if (!raw) return null;
+
+  // Ex.: "token=abc; jwt=def; access_token=ghi"
+  const map = {};
+  for (const pair of raw.split(';')) {
+    const [k, ...v] = pair.trim().split('=');
+    if (!k) continue;
+    map[k] = decodeURIComponent(v.join('=') || '');
   }
-
-  // Cookies: authToken / token / jwt / access_token
-  const cookieHeader = req.headers?.cookie || '';
-  if (cookieHeader) {
-    const map = Object.fromEntries(
-      cookieHeader
-        .split(';')
-        .map(s => s.trim())
-        .filter(Boolean)
-        .map(pair => {
-          const i = pair.indexOf('=');
-          const k = pair.slice(0, i);
-          const v = decodeURIComponent(pair.slice(i + 1));
-          return [k, v];
-        })
-    );
-    const cookieToken =
-      map.authToken || map.token || map.jwt || map.access_token;
-    if (cookieToken) return cookieToken;
-  }
-
-  // x-access-token
-  const alt = req.headers['x-access-token'];
-  if (typeof alt === 'string' && alt) return alt;
-
-  return null;
+  return map.token || map.jwt || map.access_token || null;
 }
 
-function setUserOnReq(req, payload) {
-  const id = payload.userId ?? payload.id ?? payload.sub ?? null;
-  req.userId = id || null;
-  req.user = {
-    id,
-    email: payload.email ?? null,
-    role: payload.role ?? 'user',
-    raw: payload,
-  };
-}
-
-/** Requer estar autenticado */
-export function authenticate(req, res, next) {
+/**
+ * Middleware de proteção: exige token válido.
+ * Popular req.userId, req.userEmail, req.userRole para as rotas seguintes.
+ */
+export function protect(req, res, next) {
   try {
     const token = extractToken(req);
     if (!token) {
-      return res.status(401).json({ ok: false, error: 'unauthorized' });
-    }
-
-    const secret = process.env.JWT_SECRET;
-    if (!secret) {
-      console.error('[AUTH] JWT_SECRET ausente no ambiente.');
-      return res.status(500).json({ ok: false, error: 'server_misconfigured' });
-    }
-
-    const payload = jwt.verify(token, secret);
-    setUserOnReq(req, payload);
-
-    if (!req.userId) {
       return res
         .status(401)
-        .json({ ok: false, error: 'invalid_token_payload' });
+        .json({ ok: false, error: 'Não foi possível autenticar. Faça login novamente.' });
     }
 
-    return next();
-  } catch (err) {
-    console.warn('[AUTH] Token inválido:', err?.message);
-    return res.status(401).json({ ok: false, error: 'unauthorized' });
-  }
-}
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-/** Autenticação opcional (não quebra a rota) */
-export function authenticateOptional(req, _res, next) {
-  try {
-    const token = extractToken(req);
-    if (!token) return next();
+    // Popular dados mais comuns do payload (ajuste conforme seu JWT)
+    req.userId =
+      decoded.id || decoded.userId || decoded.sub || decoded.uid || decoded.user_id;
+    req.userEmail = decoded.email || decoded.user || decoded.username || null;
+    req.userRole =
+      decoded.role || decoded.perfil || decoded.claims?.role || decoded.level || null;
 
-    const secret = process.env.JWT_SECRET;
-    if (!secret) return next();
-
-    const payload = jwt.verify(token, secret);
-    setUserOnReq(req, payload);
     return next();
   } catch {
-    return next();
+    return res
+      .status(401)
+      .json({ ok: false, error: 'Não foi possível autenticar. Faça login novamente.' });
   }
 }
 
-/** Exige perfil admin */
+/**
+ * Middleware para rotas administrativas.
+ * Faz checagem simples do campo de role do token.
+ * Se você armazena a role no banco, ajuste aqui para buscar no Prisma.
+ */
 export function admin(req, res, next) {
-  const proceed = () => {
-    if (!req.user || (req.user.role ?? 'user') !== 'admin') {
-      return res.status(403).json({ ok: false, error: 'forbidden' });
-    }
+  const role = (req.userRole || '').toString().toLowerCase();
+  if (role === 'admin' || role === 'administrator' || role === 'superadmin') {
     return next();
-  };
-
-  if (!req.user) {
-    return authenticate(req, res, (err) => {
-      if (err) return next(err);
-      return proceed();
-    });
   }
-  return proceed();
+  return res.status(403).json({ ok: false, error: 'Acesso negado.' });
 }
-
-/** Alias compatível com seu código antigo */
-export const protect = authenticate;
-export default authenticate;
