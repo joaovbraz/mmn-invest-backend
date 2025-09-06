@@ -1,4 +1,4 @@
-// src/index.js (Versão Final 100% Completa com CORS e Novas Rotas)
+// src/index.js (Sua Versão Final 100% Completa com a correção do CORS)
 import express from 'express';
 import { PrismaClient, Prisma } from '@prisma/client';
 import cors from 'cors';
@@ -43,13 +43,13 @@ async function updateUserRankByTotalInvestment(userId) {
 
 // ======================= MIDDLEWARE & SETUP =======================
 
-// ✅ MUDANÇA CRÍTICA: Configuração do CORS
+// ✅ CORREÇÃO CRÍTICA: Configuração do CORS para permitir cookies
 const corsOptions = {
   origin: process.env.FRONTEND_URL || 'https://tdp-invest-frontend.vercel.app', 
   credentials: true, // Permite que o navegador envie cookies
 };
 app.use(cors(corsOptions));
-// ✅ FIM DA MUDANÇA
+// ✅ FIM DA CORREÇÃO
 
 app.use(express.json());
 
