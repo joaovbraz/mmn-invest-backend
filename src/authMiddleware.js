@@ -2,25 +2,25 @@
 import jwt from 'jsonwebtoken';
 
 /**
- * Extrai o token do request em várias fontes:
+ * Extrai token do request:
  * - Authorization: Bearer <token>
- * - query string (?token=<token>)  -> necessário para EventSource/SSE
+ * - query string (?token=<token>)  -> útil para SSE/EventSource
  * - cookie "authToken"
- * - header "x-access-token" (fallback)
+ * - header "x-access-token"
  */
 function extractToken(req) {
-  // 1) Authorization: Bearer <token>
+  // Authorization
   const auth = req.headers?.authorization || '';
   if (auth.toLowerCase().startsWith('bearer ')) {
     return auth.slice(7).trim();
   }
 
-  // 2) ?token=<jwt> (SSE não permite custom headers)
+  // ?token=
   if (req.query && typeof req.query.token === 'string' && req.query.token.length > 0) {
     return req.query.token;
   }
 
-  // 3) Cookie "authToken" (caso você opte usar cookies no front)
+  // Cookie
   const cookieHeader = req.headers?.cookie || '';
   if (cookieHeader.includes('authToken=')) {
     try {
@@ -36,7 +36,7 @@ function extractToken(req) {
     }
   }
 
-  // 4) Header alternativo
+  // x-access-token
   const alt = req.headers['x-access-token'];
   if (typeof alt === 'string' && alt.length > 0) {
     return alt;
@@ -47,7 +47,6 @@ function extractToken(req) {
 
 /**
  * Valida o JWT e popula req.user.
- * Retorna 401 se não houver ou se for inválido.
  */
 export function authenticate(req, res, next) {
   try {
@@ -64,7 +63,6 @@ export function authenticate(req, res, next) {
 
     const payload = jwt.verify(token, secret);
 
-    // compat: alguns lugares usam userId, outros id
     const userId = payload.userId ?? payload.id ?? payload.sub;
     if (!userId) {
       return res.status(401).json({ ok: false, error: 'invalid_token_payload' });
@@ -85,8 +83,7 @@ export function authenticate(req, res, next) {
 }
 
 /**
- * Autenticação opcional: se houver token válido, coloca req.user; caso contrário, segue sem 401.
- * Útil se você tiver rotas públicas que se beneficiem de saber o usuário quando disponível.
+ * Opcional: se houver token válido, seta req.user; senão segue.
  */
 export function authenticateOptional(req, _res, next) {
   try {
@@ -105,9 +102,35 @@ export function authenticateOptional(req, _res, next) {
     };
     return next();
   } catch {
-    // ignora erros e segue como não autenticado
     return next();
   }
 }
 
+/**
+ * Checagem de admin. Pressupõe que protect/autenticate já rodou antes.
+ * Se preferir usar isolado, ele tenta autenticar também.
+ */
+export function admin(req, res, next) {
+  if (!req.user) {
+    // tenta autenticar se alguém usar admin isolado
+    return authenticate(req, res, function afterAuth(err) {
+      if (err) return next(err);
+      if (!req.user) return res.status(401).json({ ok: false, error: 'unauthorized' });
+      if ((req.user.role ?? 'user') !== 'admin') {
+        return res.status(403).json({ ok: false, error: 'forbidden' });
+      }
+      return next();
+    });
+  }
+
+  if ((req.user.role ?? 'user') !== 'admin') {
+    return res.status(403).json({ ok: false, error: 'forbidden' });
+  }
+  return next();
+}
+
+/** Compat com seu código antigo */
+export const protect = authenticate;
+
+/** default export opcional */
 export default authenticate;
