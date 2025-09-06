@@ -1,21 +1,21 @@
 // src/authMiddleware.js
 import jwt from 'jsonwebtoken';
 
-/* --- util: extrai token de vários lugares --- */
+/** Extrai o token de vários lugares: Authorization, query, cookies e header alternativo */
 function extractToken(req) {
-  // 1) Authorization: Bearer xxx
+  // Authorization: Bearer <token>
   const auth = req.headers?.authorization || '';
   if (auth.toLowerCase().startsWith('bearer ')) {
     const t = auth.slice(7).trim();
     if (t) return t;
   }
 
-  // 2) Query string (?token=)
+  // ?token=<token>
   if (req.query && typeof req.query.token === 'string' && req.query.token) {
     return req.query.token;
   }
 
-  // 3) Cookies
+  // Cookies: authToken / token / jwt / access_token
   const cookieHeader = req.headers?.cookie || '';
   if (cookieHeader) {
     const map = Object.fromEntries(
@@ -24,9 +24,9 @@ function extractToken(req) {
         .map(s => s.trim())
         .filter(Boolean)
         .map(pair => {
-          const idx = pair.indexOf('=');
-          const k = pair.slice(0, idx);
-          const v = decodeURIComponent(pair.slice(idx + 1));
+          const i = pair.indexOf('=');
+          const k = pair.slice(0, i);
+          const v = decodeURIComponent(pair.slice(i + 1));
           return [k, v];
         })
     );
@@ -35,14 +35,13 @@ function extractToken(req) {
     if (cookieToken) return cookieToken;
   }
 
-  // 4) x-access-token
+  // x-access-token
   const alt = req.headers['x-access-token'];
   if (typeof alt === 'string' && alt) return alt;
 
   return null;
 }
 
-/* --- seta req.user e req.userId --- */
 function setUserOnReq(req, payload) {
   const id = payload.userId ?? payload.id ?? payload.sub ?? null;
   req.userId = id || null;
@@ -54,7 +53,7 @@ function setUserOnReq(req, payload) {
   };
 }
 
-/* --- middleware: precisa estar autenticado --- */
+/** Requer estar autenticado */
 export function authenticate(req, res, next) {
   try {
     const token = extractToken(req);
@@ -72,7 +71,9 @@ export function authenticate(req, res, next) {
     setUserOnReq(req, payload);
 
     if (!req.userId) {
-      return res.status(401).json({ ok: false, error: 'invalid_token_payload' });
+      return res
+        .status(401)
+        .json({ ok: false, error: 'invalid_token_payload' });
     }
 
     return next();
@@ -82,7 +83,7 @@ export function authenticate(req, res, next) {
   }
 }
 
-/* --- middleware: autenticação opcional --- */
+/** Autenticação opcional (não quebra a rota) */
 export function authenticateOptional(req, _res, next) {
   try {
     const token = extractToken(req);
@@ -99,7 +100,7 @@ export function authenticateOptional(req, _res, next) {
   }
 }
 
-/* --- middleware: exige perfil admin --- */
+/** Exige perfil admin */
 export function admin(req, res, next) {
   const proceed = () => {
     if (!req.user || (req.user.role ?? 'user') !== 'admin') {
@@ -117,6 +118,6 @@ export function admin(req, res, next) {
   return proceed();
 }
 
-/* compat com seu código antigo */
+/** Alias compatível com seu código antigo */
 export const protect = authenticate;
 export default authenticate;
