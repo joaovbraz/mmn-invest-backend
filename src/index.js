@@ -44,8 +44,11 @@ async function updateUserRankByTotalInvestment(userId) {
 
 /* ======================= MIDDLEWARE & SETUP ======================= */
 
+// ✅ CORREÇÃO: Configuração de CORS mais explícita para resolver o erro de preflight
 const corsOptions = {
   origin: process.env.FRONTEND_URL || 'https://tdp-invest-frontend.vercel.app',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
 };
 console.log(`[CORS] origin permitido: ${corsOptions.origin}`);

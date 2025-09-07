@@ -56,7 +56,7 @@ export function authenticate(req, res, next) {
   try {
     const token = extractToken(req);
     if (!token) {
-      console.warn('[AUTH] Nenhum token encontrado.');
+      console.warn('[AUTH] Nenhum token encontrado. Headers:', req.headers);
       return res.status(401).json({ ok: false, error: 'unauthorized' });
     }
 
@@ -70,7 +70,7 @@ export function authenticate(req, res, next) {
     setUserOnReq(req, payload);
 
     if (!req.userId) {
-      console.warn('[AUTH] Payload não contém userId válido:', payload);
+      console.warn('[AUTH] Payload sem userId válido:', payload);
       return res.status(401).json({ ok: false, error: 'invalid_token_payload' });
     }
 
@@ -85,10 +85,8 @@ export function authenticateOptional(req, _res, next) {
   try {
     const token = extractToken(req);
     if (!token) return next();
-
     const secret = process.env.JWT_SECRET;
     if (!secret) return next();
-
     const payload = jwt.verify(token, secret);
     setUserOnReq(req, payload);
     return next();
@@ -104,7 +102,6 @@ export function admin(req, res, next) {
     }
     return next();
   };
-
   if (!req.user) {
     return authenticate(req, res, (err) => {
       if (err) return next(err);
