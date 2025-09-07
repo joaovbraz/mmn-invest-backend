@@ -1,4 +1,5 @@
-// src/index.js (VERSÃO FINAL 100% COMPLETA)
+// src/index.js (VERSÃO ATUALIZADA: adiciona PUT /meus-dados)
+
 import express from 'express';
 import { PrismaClient, Prisma } from '@prisma/client';
 import cors from 'cors';
@@ -74,7 +75,6 @@ app.post('/criar-usuario', async (req, res) => {
     let referrerId = null;
 
     if (referrerCode) {
-      // ✅ correção: usar a variável referrerCode (e não referralCode)
       const referrerUser = await prisma.user.findUnique({ where: { referralCode: referrerCode } });
       if (referrerUser) {
         referrerId = referrerUser.id;
@@ -169,6 +169,64 @@ app.get('/meus-dados', protect, async (req, res) => {
   } catch (error) {
     console.error('Erro ao buscar dados do usuário:', error);
     res.status(500).json({ error: 'Não foi possível buscar os dados do usuário.' });
+  }
+});
+
+/* ✅ NOVO: ATUALIZAÇÃO DE PERFIL (apenas campos seguros) */
+app.put('/meus-dados', protect, async (req, res) => {
+  try {
+    let { name, phone } = req.body || {};
+    const data = {};
+
+    if (typeof name === 'string') {
+      name = name.trim();
+      if (name.length < 2) {
+        return res.status(400).json({ error: 'O nome deve ter ao menos 2 caracteres.' });
+      }
+      data.name = name;
+    }
+
+    // ⚠️ Atualize "phone" se esse campo existir no seu schema Prisma.
+    // Para não quebrar se não existir, só defina se veio string e você realmente tem esse campo.
+    if (typeof phone === 'string' && phone.trim()) {
+      data.phone = phone.trim();
+    }
+
+    if (Object.keys(data).length === 0) {
+      return res.status(400).json({ error: 'Nenhum campo válido para atualizar.' });
+    }
+
+    await prisma.user.update({
+      where: { id: req.user.id },
+      data,
+    });
+
+    // Retorna no mesmo shape do GET /meus-dados
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      include: { wallet: true, _count: { select: { referees: true } } },
+    });
+
+    const investments = await prisma.investment.findMany({
+      where: { userId: req.user.id },
+      include: { plan: true },
+    });
+
+    const totalInvested = investments.reduce((sum, inv) => sum + inv.plan.price.toNumber(), 0);
+    const walletBalance = user.wallet ? user.wallet.balance.toNumber() : 0;
+
+    const { password: __, ...safeUser } = user;
+    res.status(200).json({
+      ...safeUser,
+      wallet: { ...safeUser.wallet, balance: walletBalance },
+      totalInvested,
+      referralCount: safeUser._count.referees,
+    });
+  } catch (error) {
+    // Se o campo "phone" não existir no seu schema, o Prisma lança erro de validação.
+    // Nesse caso, comente a atribuição de "data.phone" acima ou remova esse campo do schema.
+    console.error('Erro ao atualizar dados do usuário:', error);
+    res.status(500).json({ error: 'Não foi possível atualizar seus dados.' });
   }
 });
 
@@ -399,29 +457,8 @@ app.get('/minhas-cotas-finalizadas', protect, async (req, res) => {
   }
 });
 
-app.get('/meu-extrato', protect, async (req, res) => {
-  try {
-    const wallet = await prisma.wallet.findUnique({ where: { userId: req.user.id } });
-    if (!wallet) return res.status(404).json({ error: 'Carteira não encontrada.' });
-
-    const transactions = await prisma.transaction.findMany({
-      where: { walletId: wallet.id },
-      orderBy: { createdAt: 'desc' },
-    });
-    const safe = transactions.map((t) => ({ ...t, amount: t.amount.toNumber() }));
-    res.status(200).json(safe);
-  } catch {
-    res.status(500).json({ error: 'Erro ao buscar extrato.' });
-  }
-});
-
-/* ======================= ALI ASES DE ROTA (para o seu front) ======================= */
-/* O seu front está chamando /meus-investimentos e /minha-rede-detalhes.
-   Crio aqui endpoints compatíveis para evitar 404. */
-
 app.get('/meus-investimentos', protect, async (req, res) => {
   try {
-    // Retorna TUDO (ativas e finalizadas) — o front pode filtrar pelo status.
     const investments = await prisma.investment.findMany({
       where: { userId: req.user.id },
       include: { plan: true },
@@ -444,9 +481,26 @@ app.get('/meus-investimentos', protect, async (req, res) => {
   }
 });
 
+app.get('/meu-extrato', protect, async (req, res) => {
+  try {
+    const wallet = await prisma.wallet.findUnique({ where: { userId: req.user.id } });
+    if (!wallet) return res.status(404).json({ error: 'Carteira não encontrada.' });
+
+    const transactions = await prisma.transaction.findMany({
+      where: { walletId: wallet.id },
+      orderBy: { createdAt: 'desc' },
+    });
+    const safe = transactions.map((t) => ({ ...t, amount: t.amount.toNumber() }));
+    res.status(200).json(safe);
+  } catch {
+    res.status(500).json({ error: 'Erro ao buscar extrato.' });
+  }
+});
+
+/* ======================= REDE ======================= */
+
 app.get('/minha-rede-detalhes', protect, async (req, res) => {
   try {
-    // Ajuste os campos conforme seu schema (aqui supondo tabela user.referees relacional)
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
       include: {
@@ -455,16 +509,13 @@ app.get('/minha-rede-detalhes', protect, async (req, res) => {
     });
 
     const diretos = user?.referees ?? [];
-
-    // Caso haja hierarquia de indiretos no seu schema, implemente aqui.
-    // Por enquanto, devolvo indiretos como array vazio para não dar 404.
-    const indiretos = [];
+    const indiretos = []; // placeholder
 
     res.status(200).json({
       totalNaRede: diretos.length + indiretos.length,
       diretos,
       indiretos,
-      ganhosDaRede: 0, // "Em breve" (placeholder)
+      ganhosDaRede: 0,
     });
   } catch (e) {
     console.error('Erro em /minha-rede-detalhes:', e);
